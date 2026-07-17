@@ -3,9 +3,14 @@ import type {
 	AgentEvent,
 	CreateSessionRequest,
 	CreateSessionResponse,
+	ExecutionTraceRecord,
 	InterruptSessionResponse,
+	MemoryBackend,
+	MemoryFileResponse,
+	MemoryTreeResponse,
 	SessionListResponse,
 	SessionRecord,
+	UpdateMemoryFileRequest,
 	UpdateSessionRequest,
 	Msg,
 } from './types';
@@ -47,6 +52,46 @@ export const sessionApi = {
 			offset: String(offset),
 			limit: String(limit),
 		}),
+
+	diagnosticsByReply: (sessionId: string, agentId: string, replyId: string) =>
+		client.get<ExecutionTraceRecord>(
+			`/sessions/${sessionId}/diagnostics/by-reply/${replyId}`,
+			{ agent_id: agentId },
+			{ silent: true },
+		),
+
+	memoryTree: (sessionId: string, agentId: string, backend: MemoryBackend) =>
+		client.get<MemoryTreeResponse>(
+			`/sessions/${sessionId}/memory/tree`,
+			{ agent_id: agentId, backend },
+			{ silent: true },
+		),
+
+	memoryFile: (
+		sessionId: string,
+		agentId: string,
+		backend: MemoryBackend,
+		path: string,
+	) =>
+		client.get<MemoryFileResponse>(
+			`/sessions/${sessionId}/memory/file`,
+			{ agent_id: agentId, backend, path },
+			{ silent: true },
+		),
+
+	updateMemoryFile: (
+		sessionId: string,
+		agentId: string,
+		backend: MemoryBackend,
+		path: string,
+		body: UpdateMemoryFileRequest,
+	) =>
+		client.put<MemoryFileResponse>(
+			`/sessions/${sessionId}/memory/file`,
+			body,
+			{ agent_id: agentId, backend, path },
+			{ silent: true },
+		),
 
 	/**
 	 * Subscribe to a session's live event stream via SSE.

@@ -1,15 +1,25 @@
 import type { PermissionContext } from '@agentscope-ai/agentscope/permission';
 import type { TaskContext } from '@agentscope-ai/agentscope/state';
-import { BookText, ChevronDown, Database, ListTodo, PanelRight, ShieldCheck } from 'lucide-react';
+import {
+	BookText,
+	Brain,
+	ChevronDown,
+	Database,
+	ListTodo,
+	PanelRight,
+	ShieldCheck,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { ChatModelConfig, SessionKnowledgeConfig, TTSModelConfig } from '@/api';
 import { sessionApi } from '@/api';
 import MCPSvg from '@/assets/images/mcp.svg?react';
 import { ChatContent } from '@/components/chat/ChatContent.tsx';
+import { ExecutionTraceDrawer } from '@/components/chat/ExecutionTraceDrawer';
 import { SubagentHitlCard } from '@/components/chat/SubagentHitlCard';
 import { CreateCredentialDialog } from '@/components/dialog/CreateCredentialDialog';
 import { KnowledgeBasePanel } from '@/components/panel/KnowledgeBasePanel';
+import { LongTermMemoryPanel } from '@/components/panel/LongTermMemoryPanel';
 import { McpPanel } from '@/components/panel/McpPanel';
 import { PanelDock, type PanelDescriptor, type PanelKey } from '@/components/panel/PanelDock.tsx';
 import { PermissionPanel } from '@/components/panel/PermissionPanel';
@@ -143,6 +153,8 @@ export function ChatViewport({ agentId, sessionId, onTeamUpdated }: ChatViewport
 	const [credentialRefetchTrigger, setCredentialRefetchTrigger] = useState(0);
 	const [tasksContext, setTasksContext] = useState<TaskContext | null>(null);
 	const [permissionContext, setPermissionContext] = useState<PermissionContext | null>(null);
+	const [diagnosticsReplyId, setDiagnosticsReplyId] = useState<string | null>(null);
+	const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
 	// Dock layout: columns laid out left→right, each holding up to 2
 	// panels stacked top→bottom. Open order determines placement.
 	const [panelLayout, setPanelLayout] = useState<PanelKey[][]>([]);
@@ -186,6 +198,11 @@ export function ChatViewport({ agentId, sessionId, onTeamUpdated }: ChatViewport
 	// Close a panel (driven by the panel's own close button).
 	const closePanel = useCallback((key: PanelKey) => {
 		setPanelLayout((layout) => closePanelInLayout(layout, key));
+	}, []);
+
+	const openDiagnostics = useCallback((replyId: string) => {
+		setDiagnosticsReplyId(replyId);
+		setDiagnosticsOpen(true);
 	}, []);
 
 	const isPanelOpen = useCallback(
@@ -293,6 +310,11 @@ export function ChatViewport({ agentId, sessionId, onTeamUpdated }: ChatViewport
 					/>
 				),
 			},
+			memory: {
+				title: t('panel.memory.title'),
+				icon: <Brain className="size-4" />,
+				content: <LongTermMemoryPanel sessionId={sessionId} agentId={agentId} />,
+			},
 		}),
 		[
 			t,
@@ -312,6 +334,7 @@ export function ChatViewport({ agentId, sessionId, onTeamUpdated }: ChatViewport
 			kbMiddlewareSchema,
 			handleKnowledgeConfigChange,
 			sessionId,
+			agentId,
 		],
 	);
 
@@ -607,6 +630,14 @@ export function ChatViewport({ agentId, sessionId, onTeamUpdated }: ChatViewport
 												<Database />
 												{t('panel.knowledge.title')}
 											</DropdownMenuCheckboxItem>
+											<DropdownMenuCheckboxItem
+												checked={isPanelOpen('memory')}
+												onCheckedChange={() => togglePanel('memory')}
+												onSelect={(e) => e.preventDefault()}
+											>
+												<Brain />
+												{t('panel.memory.title')}
+											</DropdownMenuCheckboxItem>
 										</DropdownMenuContent>
 									</DropdownMenu>
 								</div>
@@ -614,11 +645,13 @@ export function ChatViewport({ agentId, sessionId, onTeamUpdated }: ChatViewport
 							<div className="flex flex-1 justify-center min-h-0 overflow-hidden relative [--chat-content-w:48rem]">
 								<ChatContent
 									className={'max-w-[var(--chat-content-w)] w-full'}
+									sessionId={sessionId}
 									msgs={msgs}
 									phase={phase}
 									disabled={selectedModel === null}
 									onSend={send}
 									onUserConfirm={onUserConfirm}
+									onOpenDiagnostics={openDiagnostics}
 									onInterrupt={interrupt}
 									footerSlot={
 										subagentHitl.length > 0 ? (
@@ -705,6 +738,13 @@ export function ChatViewport({ agentId, sessionId, onTeamUpdated }: ChatViewport
 				open={credentialOpen}
 				onOpenChange={setCredentialOpen}
 				onCreated={() => setCredentialRefetchTrigger((n) => n + 1)}
+			/>
+			<ExecutionTraceDrawer
+				open={diagnosticsOpen}
+				onOpenChange={setDiagnosticsOpen}
+				sessionId={sessionId}
+				agentId={agentId}
+				replyId={diagnosticsReplyId}
 			/>
 		</>
 	);

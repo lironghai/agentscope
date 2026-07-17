@@ -16,8 +16,52 @@ Verifies the four behaviours that callers rely on:
 """
 import asyncio
 from contextlib import asynccontextmanager
+import sys
+import types
 from typing import Any, AsyncGenerator, Callable
 from unittest import IsolatedAsyncioTestCase
+from unittest.mock import patch
+
+if "tree_sitter_bash" not in sys.modules:
+    tsbash = types.ModuleType("tree_sitter_bash")
+    tsbash.language = lambda: object()
+    sys.modules["tree_sitter_bash"] = tsbash
+
+if "tree_sitter" not in sys.modules:
+    tree_sitter = types.ModuleType("tree_sitter")
+
+    class _FakeLanguage:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+    class _FakeParser:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+    class _FakeNode:
+        type = ""
+        children: list = []
+        start_byte = 0
+        end_byte = 0
+
+    tree_sitter.Language = _FakeLanguage
+    tree_sitter.Parser = _FakeParser
+    tree_sitter.Node = _FakeNode
+    sys.modules["tree_sitter"] = tree_sitter
+
+if "frontmatter" not in sys.modules:
+    frontmatter = types.ModuleType("frontmatter")
+
+    class _FakeFrontmatterPost(dict):
+        content = ""
+
+    frontmatter.loads = lambda _text: _FakeFrontmatterPost()
+    sys.modules["frontmatter"] = frontmatter
+
+if "shortuuid" not in sys.modules:
+    shortuuid = types.ModuleType("shortuuid")
+    shortuuid.uuid = lambda: "stub"
+    sys.modules["shortuuid"] = shortuuid
 
 from agentscope.app._manager import ChatRunRegistry, WakeupDispatcher
 from agentscope.app.message_bus import MessageBus, MessageBusKeys
@@ -451,6 +495,53 @@ class TestWakeupDispatcherDispatch(IsolatedAsyncioTestCase):
             chat.calls[0]["input_msg"],
             UserConfirmResultEvent,
         )
+
+    async def test_resume_running_session_has_retry_limit(self) -> None:
+        """A stuck ``resume`` does not re-enqueue forever."""
+        from agentscope.event import UserConfirmResultEvent
+
+        bus = _FakeBus()
+        chat = _FakeChatService()
+        lock_key = MessageBus._SESSION_LOCK_KEY.format(sid="stuck")
+        bus._locks.add(lock_key)
+        event = UserConfirmResultEvent.model_construct(
+            reply_id="r1",
+            confirm_results=[],
+        )
+
+        with (
+            patch(
+                "agentscope.app._manager._wakeup_dispatcher."
+                "_RESUME_RETRY_BACKOFF_SECS",
+                0.01,
+            ),
+            patch(
+                "agentscope.app._manager._wakeup_dispatcher."
+                "_RESUME_MAX_RETRIES",
+                2,
+            ),
+        ):
+            async with WakeupDispatcher(
+                message_bus=bus,
+                storage=_FakeStorage(),
+                chat_service=chat,
+                chat_run_registry=ChatRunRegistry(),
+            ):
+                await bus.queue_push(
+                    MessageBusKeys.wakeup_queue(),
+                    {
+                        "user_id": "u",
+                        "session_id": "stuck",
+                        "agent_id": "wa1",
+                        "kind": MessageBusKeys.WAKEUP_KIND_RESUME,
+                        "input": event.model_dump(mode="json"),
+                    },
+                )
+                await bus.publish(MessageBusKeys.wakeup_signal(), {})
+                await asyncio.sleep(0.15)
+
+        self.assertEqual(chat.calls, [])
+        self.assertEqual(bus.queues.get(MessageBusKeys.wakeup_queue()), [])
 
 
 class TestWakeupDispatcherLifecycle(IsolatedAsyncioTestCase):

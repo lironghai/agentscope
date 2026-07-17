@@ -15,6 +15,7 @@ import {
 	ChevronRight,
 	CirclePlay,
 	Copy,
+	Activity,
 	Loader2,
 	MessageSquareQuote,
 	Wrench,
@@ -475,14 +476,15 @@ function renderBlock(
 			);
 
 		case 'data': {
-			const dataType = block.source.media_type.split('/')[0];
+			const mediaType = block.source.media_type || 'application/octet-stream';
+			const dataType = mediaType.split('/')[0];
 			// Audio data blocks render in the footer (see AudioFooterControl),
 			// not inline alongside text.
 			if (dataType === 'audio') return null;
 			const data =
 				block.source.type === 'url'
 					? block.source.url
-					: `data:${block.source.media_type};base64,${block.source.data}`;
+					: `data:${mediaType};base64,${block.source.data}`;
 			switch (dataType) {
 				case 'image':
 					return (
@@ -508,7 +510,7 @@ function renderBlock(
 							key={index}
 							name={block.name}
 							href={data}
-							mediaType={block.source.media_type}
+							mediaType={mediaType}
 						/>
 					);
 			}
@@ -581,6 +583,7 @@ interface MessageBubbleProps {
 		replyId: string,
 		rules?: ToolCallBlock['suggested_rules'],
 	) => void;
+	onOpenDiagnostics?: (replyId: string) => void;
 }
 
 /**
@@ -600,7 +603,7 @@ interface MessageBubbleProps {
  * When `content` is empty and the message is still running, the bubble
  * body is omitted entirely so only the bottom status row renders.
  */
-export function MessageBubble({ message, onUserConfirm }: MessageBubbleProps) {
+export function MessageBubble({ message, onUserConfirm, onOpenDiagnostics }: MessageBubbleProps) {
 	const isUser = message.role === 'user';
 	const { t } = useTranslation();
 
@@ -619,12 +622,13 @@ export function MessageBubble({ message, onUserConfirm }: MessageBubbleProps) {
 
 	const blocks = groupToolCalls(message.content);
 	const audioBlocks = message.content.filter(
-		(b): b is DataBlock => b.type === 'data' && b.source.media_type.split('/')[0] === 'audio',
+		(b): b is DataBlock =>
+			b.type === 'data' && (b.source.media_type || '').split('/')[0] === 'audio',
 	);
 	// Audio data blocks are rendered in the footer, so they shouldn't keep an
 	// otherwise-empty body bubble alive.
 	const hasBodyContent = blocks.some(
-		(b) => !(b.type === 'data' && b.source.media_type.split('/')[0] === 'audio'),
+		(b) => !(b.type === 'data' && (b.source.media_type || '').split('/')[0] === 'audio'),
 	);
 	const showBody = hasBodyContent;
 	const showFooter = !isUser;
@@ -689,6 +693,17 @@ export function MessageBubble({ message, onUserConfirm }: MessageBubbleProps) {
 							<AudioInlineControl key={block.id} block={block} />
 						))}
 					</Badge>
+					{onOpenDiagnostics ? (
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-xs"
+							aria-label={t('messageBubble.openDiagnostics')}
+							onClick={() => onOpenDiagnostics(message.id)}
+						>
+							<Activity />
+						</Button>
+					) : null}
 				</div>
 			)}
 		</div>

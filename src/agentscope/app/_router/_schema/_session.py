@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from ....permission import PermissionMode
 from ...storage import (
     ChatModelConfig,
+    ExecutionTraceRecord,
     SessionKnowledgeConfig,
     TTSModelConfig,
     SessionRecord,
@@ -193,6 +194,57 @@ class ListMessagesResponse(BaseModel):
     is_running: bool = Field(
         description="Whether the session is currently running.",
     )
+
+
+class ListExecutionTracesResponse(BaseModel):
+    """Response body for listing execution traces in a session."""
+
+    traces: list[ExecutionTraceRecord] = Field(
+        description="Execution traces in reverse chronological order.",
+    )
+    total: int = Field(description="Total number of returned traces.")
+
+
+class MemoryTreeEntry(BaseModel):
+    """One file or directory entry in a memory backend tree."""
+
+    path: str = Field(description="Path relative to the backend root.")
+    name: str = Field(description="Entry basename.")
+    type: str = Field(description="Entry type: file or directory.")
+    size: int | None = Field(
+        default=None,
+        description="File size in bytes. Null for directories.",
+    )
+    editable: bool = Field(description="Whether the file can be edited.")
+    readonly: bool = Field(description="Whether the entry is read-only.")
+
+
+class MemoryTreeResponse(BaseModel):
+    """Response body for listing a memory backend root."""
+
+    backend: str = Field(description="Memory backend name.")
+    exists: bool = Field(description="Whether the backend root exists.")
+    entries: list[MemoryTreeEntry] = Field(
+        default_factory=list,
+        description="Files and directories under the backend root.",
+    )
+
+
+class MemoryFileResponse(BaseModel):
+    """Response body for reading or writing a memory file."""
+
+    backend: str = Field(description="Memory backend name.")
+    path: str = Field(description="Path relative to the backend root.")
+    content: str = Field(description="UTF-8 file content.")
+    size: int = Field(description="File size in bytes.")
+    editable: bool = Field(description="Whether the file can be edited.")
+    readonly: bool = Field(description="Whether the file is read-only.")
+
+
+class UpdateMemoryFileRequest(BaseModel):
+    """Request body for updating an editable memory file."""
+
+    content: str = Field(description="New UTF-8 file content.")
 
 
 class SessionStatusResponse(BaseModel):

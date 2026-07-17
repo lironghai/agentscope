@@ -103,6 +103,7 @@
 		"audioGenerating": "Generating audio…",
 		"playAudio": "Play audio",
 		"pauseAudio": "Pause audio",
+		"openDiagnostics": "Open execution diagnostics",
 		"running": "Running...",
 		"hintSource": {
 			"tool_output": "Tool Output",
@@ -562,6 +563,23 @@
 			"parametersDescription": "Knowledge base retrieval settings.",
 			"selectedCount": "{{count}} attached"
 		},
+		"memory": {
+			"title": "Memory",
+			"refresh": "Refresh memory files",
+			"dirty": "Unsaved",
+			"saved": "Memory file saved",
+			"unavailableTitle": "Memory backend unavailable",
+			"unavailableDescription": "This memory backend is not available for the current session.",
+			"emptyTitle": "No memory files",
+			"emptyDescription": "This backend has no browsable memory files.",
+			"noFileSelected": "No file selected",
+			"selectFile": "Select a file to preview or edit.",
+			"backend": {
+				"agentic": "Agentic",
+				"reme": "ReMe",
+				"mem0": "Mem0"
+			}
+		},
 		"permission": {
 			"title": "Permissions",
 			"description": "The permissions applied in this session.",
@@ -580,6 +598,25 @@
 			"emptyDescription": "Nothing matches “{{query}}”."
 		},
 		"loading": "Loading…"
+	},
+	"diagnostics": {
+		"title": "Execution Diagnostics",
+		"noReply": "No reply selected",
+		"emptyTitle": "No diagnostics",
+		"emptyDescription": "No execution trace was found for this reply.",
+		"emptySection": "No data.",
+		"summary": "Summary",
+		"status": "Status",
+		"duration": "Duration",
+		"model": "Model",
+		"fallbackModel": "Fallback model",
+		"provider": "Provider",
+		"inputTokens": "Input",
+		"outputTokens": "Output",
+		"error": "Error",
+		"stages": "Stages",
+		"toolCalls": "Tool calls",
+		"events": "Events"
 	},
 	"team-sidebar": {
 		"membersHeading": "Members",

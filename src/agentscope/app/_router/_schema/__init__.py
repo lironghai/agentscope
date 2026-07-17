@@ -49,11 +49,16 @@ from ._session import (
     UpdateSessionRequest,
     ListSessionsResponse,
     ListMessagesResponse,
+    ListExecutionTracesResponse,
+    MemoryFileResponse,
+    MemoryTreeEntry,
+    MemoryTreeResponse,
     SessionStatus,
     SessionStatusResponse,
     SessionView,
     TeamDetailResponse,
     TeamMemberView,
+    UpdateMemoryFileRequest,
 )
 
 __all__ = [
@@ -108,9 +113,14 @@ __all__ = [
     "UpdateSessionRequest",
     "ListSessionsResponse",
     "ListMessagesResponse",
+    "ListExecutionTracesResponse",
+    "MemoryFileResponse",
+    "MemoryTreeEntry",
+    "MemoryTreeResponse",
     "SessionStatus",
     "SessionStatusResponse",
     "SessionView",
     "TeamDetailResponse",
     "TeamMemberView",
+    "UpdateMemoryFileRequest",
 ]

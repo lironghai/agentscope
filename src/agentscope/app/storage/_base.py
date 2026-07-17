@@ -17,6 +17,7 @@ from ._model import (
     SessionConfig,
     SessionSource,
     TeamRecord,
+    ExecutionTraceRecord,
 )
 from ...credential import CredentialBase
 from ...message import Msg
@@ -453,6 +454,55 @@ class StorageBase(ABC):
         Returns:
             `list[Msg]`: Messages in chronological order.
         """
+
+    # ------------------------------------------------------------------
+    # Execution trace persistence
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    async def upsert_execution_trace(
+        self,
+        user_id: str,
+        session_id: str,
+        trace: ExecutionTraceRecord,
+    ) -> ExecutionTraceRecord:
+        """Create or update an execution trace record."""
+
+    @abstractmethod
+    async def get_execution_trace(
+        self,
+        user_id: str,
+        session_id: str,
+        trace_id: str,
+    ) -> ExecutionTraceRecord | None:
+        """Fetch a single execution trace by id."""
+
+    @abstractmethod
+    async def get_execution_trace_by_reply(
+        self,
+        user_id: str,
+        session_id: str,
+        reply_id: str,
+    ) -> ExecutionTraceRecord | None:
+        """Fetch a single execution trace by reply id."""
+
+    @abstractmethod
+    async def list_execution_traces(
+        self,
+        user_id: str,
+        session_id: str,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> list[ExecutionTraceRecord]:
+        """Return execution traces for a session, newest first."""
+
+    @abstractmethod
+    async def delete_execution_traces(
+        self,
+        user_id: str,
+        session_id: str,
+    ) -> int:
+        """Delete all execution traces for a session."""
 
     # ------------------------------------------------------------------
     # Team persistence

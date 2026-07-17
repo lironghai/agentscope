@@ -2,11 +2,14 @@
 """The storage module in agentscope."""
 
 from ._base import StorageBase
+from ._postgres_storage import PostgresStorage
 from ._redis_storage import RedisStorage
 from ._model import (
     AgentData,
     AgentRecord,
     CredentialRecord,
+    ExecutionTraceRecord,
+    ExecutionTraceStatus,
     KnowledgeBaseRecord,
     KnowledgeDocumentData,
     KnowledgeDocumentRecord,
@@ -30,12 +33,15 @@ from ._model import (
 
 __all__ = [
     "StorageBase",
+    "PostgresStorage",
     "RedisStorage",
     # The ORM models
     "InviteConfig",
     "AgentData",
     "AgentRecord",
     "CredentialRecord",
+    "ExecutionTraceRecord",
+    "ExecutionTraceStatus",
     "KnowledgeBaseRecord",
     "KnowledgeDocumentData",
     "KnowledgeDocumentRecord",

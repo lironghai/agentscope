@@ -6,6 +6,7 @@ from ._lifespan import lifespan
 from .access import DenyAllResourceAccessPolicy, ResourceAccessPolicyBase
 from .rag.blob_store import BlobStoreBase, LocalBlobStore
 from .rag.knowledge_base_manager import KnowledgeBaseManagerBase
+from ._service._long_term_memory_browser import LongTermMemoryBrowser
 from .workspace_manager import WorkspaceManagerBase
 from ._router import (
     agent_router,
@@ -57,6 +58,7 @@ def create_app(
     custom_subagent_templates: list[SubAgentTemplate] | None = None,
     custom_agent_cls: Type[Agent] | None = None,
     resource_access_policy: ResourceAccessPolicyBase | None = None,
+    long_term_memory_browser: LongTermMemoryBrowser | None = None,
     title: str = "AgentScope",
     version: str = __version__,
 ) -> FastAPI:
@@ -186,6 +188,11 @@ def create_app(
             user. When ``None`` (default), a
             :class:`DenyAllResourceAccessPolicy` is installed which
             preserves the historical owner-isolated behavior.
+        long_term_memory_browser (`LongTermMemoryBrowser | None`, optional):
+            Browser service for long-term memory files. Session ownership is
+            still checked by the router before files are listed or edited.
+            ``None`` disables memory browser endpoints with a controlled
+            503 response.
         title (`str`, defaults to ``"AgentScope"``):
             OpenAPI title shown in the docs UI.
         version (`str`, defaults to the package version):
@@ -213,6 +220,7 @@ def create_app(
     app.state.resource_access_policy = (
         resource_access_policy or DenyAllResourceAccessPolicy()
     )
+    app.state.long_term_memory_browser = long_term_memory_browser
 
     # Parser / chunker / blob-store defaults only make sense when the
     # KB feature is actually enabled.  When ``knowledge_base_manager`` is

@@ -4,7 +4,8 @@ Agent service is a FastAPI-based, multi-tenant and multi-session service built w
 
 This example demonstrates
 
-- how to set up the agent service with Redis storage, and
+- how to set up the agent service with PostgreSQL storage and pgvector RAG,
+- how to use Redis as the cross-process message bus, and
 - how to launch the service and its companion Web UI
 
 Details about the agent service please refer to the [tutorial](https://docs.agentscope.io/latest/en/deploy/agent-service).
@@ -13,7 +14,10 @@ Details about the agent service please refer to the [tutorial](https://docs.agen
 
 - Python ≥ 3.11
 - Node.js ≥ 20 with `npx`
+- PostgreSQL with the `pgvector` extension available
+- Redis for the message bus
 - [optional] Gaode/AMap API key in `AMAP_API_KEY` (for the `amap` MCP)
+- [optional] `DASHSCOPE_API_KEY` or `MEM0_API_KEY` for mem0 long-term memory
 
 ## Quickstart
 
@@ -25,19 +29,40 @@ uv pip install agentscope[full]
 # uv pip install -e [full]
 ```
 
-Install Redis and start it as backend storage:
+Install PostgreSQL with pgvector and start Redis as the message bus:
 
 ```bash
-# macOS (Homebrew)
-brew install redis
-brew services start redis
+# PostgreSQL + pgvector
+docker run --rm -p 5432:5432 \
+  -e POSTGRES_DB=agentscope \
+  -e POSTGRES_USER=agentscope \
+  -e POSTGRES_PASSWORD=agentscope \
+  pgvector/pgvector:pg16
 
-# Linux (systemd)
-sudo apt install redis-server
-sudo systemctl start redis-server
-
-# Docker (cross-platform)
+# Redis message bus
 docker run --rm -p 6379:6379 redis:7
+```
+
+Configure the service if you are not using the local defaults:
+
+```bash
+export POSTGRES_HOST=localhost
+export POSTGRES_PORT=5432
+export POSTGRES_DB=agentscope
+export POSTGRES_USER=agentscope
+export POSTGRES_PASSWORD=agentscope
+
+export REDIS_HOST=localhost
+export REDIS_PORT=6379
+```
+
+Long-term memory file backends use user-agent scope by default, so the same
+user chatting with the same agent can reuse Agentic/ReMe file memory across
+sessions:
+
+```bash
+export AGENT_SERVICE_MEMORY_SCOPE=user_agent  # default
+# export AGENT_SERVICE_MEMORY_SCOPE=session   # opt into isolated sessions
 ```
 
 Start the agent service:

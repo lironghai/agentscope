@@ -1,0 +1,353 @@
+# AgentScope Agent Service + official examples/web_ui frontend.
+#
+# Important boundaries:
+# - Agent Service 2.0.4 uses RedisStorage/RedisMessageBus. The PostgreSQL
+#   settings below are reserved for site integration and are not consumed by
+#   the upstream Agent Service example unless a PostgreSQL StorageBase is added.
+# - The upstream web UI stores the API server URL in browser localStorage during
+#   setup. Open the UI and set the server URL to:
+#   https://agentscope-api.alik0.yingxiong.com
+# - This manifest expects the web UI image to be built separately from
+#   examples/web_ui and pushed as:
+#   hero-bdc-registry-vpc.cn-beijing.cr.aliyuncs.com/public/agentscope-web-ui:latest
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: n8n
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentscope-external-redis
+  namespace: n8n
+  labels:
+    app.kubernetes.io/name: agentscope
+    app.kubernetes.io/component: external-redis
+spec:
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: agentscope-external-redis-1
+  namespace: n8n
+  labels:
+    kubernetes.io/service-name: agentscope-external-redis
+    app.kubernetes.io/name: agentscope
+    app.kubernetes.io/component: external-redis
+addressType: IPv4
+ports:
+  - name: redis
+    protocol: TCP
+    port: 6379
+endpoints:
+  - addresses:
+      - "172.17.89.58"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentscope-external-postgres
+  namespace: n8n
+  labels:
+    app.kubernetes.io/name: agentscope
+    app.kubernetes.io/component: external-postgres
+spec:
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: agentscope-external-postgres-1
+  namespace: n8n
+  labels:
+    kubernetes.io/service-name: agentscope-external-postgres
+    app.kubernetes.io/name: agentscope
+    app.kubernetes.io/component: external-postgres
+addressType: IPv4
+ports:
+  - name: postgres
+    protocol: TCP
+    port: 5432
+endpoints:
+  - addresses:
+      - "172.17.89.58"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentscope-config
+  namespace: n8n
+  labels:
+    app.kubernetes.io/name: agentscope
+    app.kubernetes.io/component: api
+data:
+  AGENTSCOPE_REDIS_HOST: "agentscope-external-redis.n8n.svc.cluster.local"
+  AGENTSCOPE_REDIS_PORT: "6379"
+  AGENTSCOPE_REDIS_DB: "13"
+  AGENTSCOPE_ENABLE_REDIS_MESSAGE_BUS: "true"
+  AGENTSCOPE_ENABLE_BROWSER_MCP: "false"
+  AGENTSCOPE_WORKSPACE_DIR: "/data/agentscope/workspaces"
+  AGENTSCOPE_QDRANT_LOCATION: ":memory:"
+  TZ: "Asia/Shanghai"
+  POSTGRES_HOST: "agentscope-external-postgres.n8n.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "agentscope"
+  POSTGRES_USER: "hero_postgres_agentscope"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agentscope-secret
+  namespace: n8n
+  labels:
+    app.kubernetes.io/name: agentscope
+type: Opaque
+stringData:
+  AGENTSCOPE_REDIS_PASSWORD: "2646dg#!@#heroredis"
+  POSTGRES_PASSWORD: "CHANGE_ME_CREATE_IN_EXTERNAL_POSTGRES"
+  DATABASE_URL: "postgresql://hero_postgres_agentscope:CHANGE_ME_CREATE_IN_EXTERNAL_POSTGRES@agentscope-external-postgres.n8n.svc.cluster.local:5432/agentscope"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: agentscope-data
+  namespace: n8n
+  labels:
+    app.kubernetes.io/name: agentscope
+    app.kubernetes.io/component: api
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: alik0
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentscope-api
+  namespace: n8n
+  labels:
+    app.kubernetes.io/name: agentscope
+    app.kubernetes.io/component: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentscope
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agentscope
+        app.kubernetes.io/component: api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: agentscope-api
+          image: hero-bdc-registry-vpc.cn-beijing.cr.aliyuncs.com/public/agentscope:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: agentscope-config
+            - secretRef:
+                name: agentscope-secret
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /data/agentscope
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: agentscope-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentscope-api
+  namespace: n8n
+  labels:
+    app.kubernetes.io/name: agentscope
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: agentscope
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentscope-web-ui
+  namespace: n8n
+  labels:
+    app.kubernetes.io/name: agentscope
+    app.kubernetes.io/component: web-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentscope
+      app.kubernetes.io/component: web-ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agentscope
+        app.kubernetes.io/component: web-ui
+    spec:
+      containers:
+        - name: agentscope-web-ui
+          image: hero-bdc-registry-vpc.cn-beijing.cr.aliyuncs.com/public/agentscope-web-ui:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            - name: AGENTSCOPE_API_BASE_URL
+              value: "https://agentscope-api.alik0.yingxiong.com"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentscope-web-ui
+  namespace: n8n
+  labels:
+    app.kubernetes.io/name: agentscope
+    app.kubernetes.io/component: web-ui
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: agentscope
+    app.kubernetes.io/component: web-ui
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentscope-api
+  namespace: n8n
+  labels:
+    app.kubernetes.io/name: agentscope
+    app.kubernetes.io/component: api
+  annotations:
+    nginx.ingress.kubernetes.io/whitelist-source-range: "120.46.70.171/32,39.106.39.239/32,36.110.84.214/32,103.90.188.114/32,103.90.188.115/32,101.46.0.76/32,60.205.195.217/32,202.60.224.78/32,58.135.84.44/32,58.135.84.42/32,101.126.59.88/32,101.126.59.89/32,101.126.59.90/32,101.126.59.91/32,101.126.59.92/32,122.14.241.34/32,122.14.241.35/32,122.14.241.36/32,122.14.241.37/32,122.14.241.38/32,115.190.125.187/32,180.184.74.238/32,115.191.55.120/32,101.126.68.236/32,101.126.70.32/32,101.126.68.236/32,115.190.248.235/32,115.190.245.25/32,115.191.70.180/32,115.191.70.178/32,115.191.70.18/32,115.190.211.229/32,115.190.213.243/32,106.38.226.176/32"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: agentscope-api.alik0.yingxiong.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscope-api
+                port:
+                  number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentscope-web-ui
+  namespace: n8n
+  labels:
+    app.kubernetes.io/name: agentscope
+    app.kubernetes.io/component: web-ui
+  annotations:
+    nginx.ingress.kubernetes.io/whitelist-source-range: "120.46.70.171/32,39.106.39.239/32,36.110.84.214/32,103.90.188.114/32,103.90.188.115/32,101.46.0.76/32,60.205.195.217/32,202.60.224.78/32,58.135.84.44/32,58.135.84.42/32,101.126.59.88/32,101.126.59.89/32,101.126.59.90/32,101.126.59.91/32,101.126.59.92/32,122.14.241.34/32,122.14.241.35/32,122.14.241.36/32,122.14.241.37/32,122.14.241.38/32,115.190.125.187/32,180.184.74.238/32,115.191.55.120/32,101.126.68.236/32,101.126.70.32/32,101.126.68.236/32,115.190.248.235/32,115.190.245.25/32,115.191.70.180/32,115.191.70.178/32,115.191.70.18/32,115.190.211.229/32,115.190.213.243/32,106.38.226.176/32"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: agentscope.alik0.yingxiong.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscope-web-ui
+                port:
+                  number: 80

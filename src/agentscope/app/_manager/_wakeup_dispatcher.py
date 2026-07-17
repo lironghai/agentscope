@@ -56,6 +56,7 @@ _RESUME_INPUT_ADAPTER: TypeAdapter = TypeAdapter(
 # lock). Short enough to feel instant to the user, long enough to avoid
 # a hot re-enqueue loop while the lock is held.
 _RESUME_RETRY_BACKOFF_SECS = 0.1
+_RESUME_MAX_RETRIES = 100
 
 
 class WakeupDispatcher:
@@ -196,12 +197,18 @@ class WakeupDispatcher:
                 continue
             # Entries from older producers omit ``kind`` — treat as wake.
             kind = payload.get("kind", MessageBusKeys.WAKEUP_KIND_WAKE)
+            retry_count = payload.get("resume_retry_count", 0)
+            try:
+                retry_count = int(retry_count)
+            except (TypeError, ValueError):
+                retry_count = 0
             await self._dispatch_one(
                 user_id=user_id,
                 session_id=session_id,
                 agent_id=agent_id,
                 kind=kind,
                 raw_input=payload.get("input"),
+                resume_retry_count=retry_count,
             )
 
     async def _dispatch_one(
@@ -211,6 +218,7 @@ class WakeupDispatcher:
         agent_id: str,
         kind: str,
         raw_input: dict | None,
+        resume_retry_count: int = 0,
     ) -> None:
         """Dispatch a single trigger entry by its ``kind``.
 
@@ -265,6 +273,7 @@ class WakeupDispatcher:
                     session_id,
                     agent_id,
                     input_msg,
+                    resume_retry_count,
                 )
             # ``wake`` triggers are safe to drop while running — the
             # live run drains the inbox itself.
@@ -312,6 +321,7 @@ class WakeupDispatcher:
                     session_id,
                     agent_id,
                     input_msg,
+                    resume_retry_count,
                 )
             else:
                 logger.debug(
@@ -328,6 +338,7 @@ class WakeupDispatcher:
         input_msg: UserConfirmResultEvent
         | ExternalExecutionResultEvent
         | None,
+        resume_retry_count: int,
     ) -> None:
         """Re-enqueue a ``resume`` trigger after a short backoff.
 
@@ -347,6 +358,15 @@ class WakeupDispatcher:
                 The parsed input event to redeliver.
         """
 
+        if resume_retry_count >= _RESUME_MAX_RETRIES:
+            logger.warning(
+                "WakeupDispatcher: dropping resume trigger for session %s "
+                "after %d deferred retry attempt(s).",
+                session_id,
+                resume_retry_count,
+            )
+            return
+
         async def _retry() -> None:
             try:
                 await asyncio.sleep(_RESUME_RETRY_BACKOFF_SECS)
@@ -357,6 +377,7 @@ class WakeupDispatcher:
                     agent_id=agent_id,
                     kind=MessageBusKeys.WAKEUP_KIND_RESUME,
                     inputs=input_msg,
+                    resume_retry_count=resume_retry_count + 1,
                 )
             except asyncio.CancelledError:
                 pass

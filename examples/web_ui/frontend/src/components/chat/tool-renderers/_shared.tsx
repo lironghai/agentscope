@@ -114,7 +114,8 @@ export function ToolCallRow({
  * @param input
  * @returns The JSON Record or empty object if parsing fails.
  */
-export function parseInput(input: string): Record<string, unknown> {
+export function parseInput(input: unknown): Record<string, unknown> {
+	if (typeof input !== 'string') return {};
 	try {
 		const parsed = JSON.parse(input);
 		return parsed && typeof parsed === 'object' ? parsed : {};
@@ -131,7 +132,7 @@ export function parseInput(input: string): Record<string, unknown> {
  * stream in as partial JSON, and a fragment of ``content`` must never pass for
  * a path.
  */
-export function tryGetFilePath(input: string): string | undefined {
+export function tryGetFilePath(input: unknown): string | undefined {
 	const { file_path } = parseInput(input) as { file_path?: unknown };
 	return typeof file_path === 'string' && file_path.length > 0 ? file_path : undefined;
 }
@@ -143,7 +144,7 @@ export function tryGetFilePath(input: string): string | undefined {
  * @param input
  * @returns The filename, considering different OS path separators.
  */
-export function tryGetFileName(input: string): string | undefined {
+export function tryGetFileName(input: unknown): string | undefined {
 	const filePath = tryGetFilePath(input);
 	if (!filePath) return undefined;
 	const segments = filePath.split(/[/\\]+/).filter(Boolean);
@@ -160,7 +161,7 @@ export function countDiffStats(diffText: string): {
 } {
 	let insertions = 0;
 	let deletions = 0;
-	for (const line of diffText.split('\n')) {
+	for (const line of (diffText || '').split('\n')) {
 		if (line.startsWith('+') && !line.startsWith('+++')) insertions++;
 		else if (line.startsWith('-') && !line.startsWith('---')) deletions++;
 	}

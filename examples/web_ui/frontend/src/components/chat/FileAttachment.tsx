@@ -3,7 +3,7 @@ import * as mime from 'mime-types';
 
 interface FileIconProps {
 	/** The MIME type, e.g. `application/pdf`. */
-	mediaType: string;
+	mediaType?: string | null;
 	/** Optional CSS classes forwarded to the icon. */
 	className?: string;
 }
@@ -17,7 +17,8 @@ interface FileIconProps {
  * @returns A lucide icon element appropriate for the file kind.
  */
 function FileIcon({ mediaType, className }: FileIconProps) {
-	switch (mediaType.split('/')[0]) {
+	const safeMediaType = mediaType || 'application/octet-stream';
+	switch (safeMediaType.split('/')[0]) {
 		case 'image':
 			return <FileImage className={className} />;
 		case 'audio':
@@ -27,7 +28,7 @@ function FileIcon({ mediaType, className }: FileIconProps) {
 		case 'text':
 			return <FileText className={className} />;
 		default:
-			return mediaType === 'application/pdf' ? (
+			return safeMediaType === 'application/pdf' ? (
 				<FileText className={className} />
 			) : (
 				<File className={className} />
@@ -70,7 +71,7 @@ interface FileAttachmentProps {
 	/** Resolved href — a remote URL or a `data:` URL — used for download. */
 	href: string;
 	/** MIME type of the file, e.g. `application/pdf`. */
-	mediaType: string;
+	mediaType?: string | null;
 }
 
 /**
@@ -88,7 +89,8 @@ interface FileAttachmentProps {
  * @returns A downloadable file-attachment card.
  */
 export function FileAttachment({ name, href, mediaType }: FileAttachmentProps) {
-	const ext = (mime.extension(mediaType) || '').toUpperCase();
+	const safeMediaType = mediaType || 'application/octet-stream';
+	const ext = (mime.extension(safeMediaType) || '').toUpperCase();
 	const displayName = name || (ext ? `file.${ext.toLowerCase()}` : 'file');
 	const { safe, downloadable } = classifyHref(href);
 
@@ -107,7 +109,7 @@ export function FileAttachment({ name, href, mediaType }: FileAttachmentProps) {
 			className="group flex w-fit max-w-xs items-center gap-3 rounded-lg border bg-muted/40 px-3 py-2 no-underline transition-colors hover:bg-muted"
 		>
 			<span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
-				<FileIcon mediaType={mediaType} className="size-4" />
+				<FileIcon mediaType={safeMediaType} className="size-4" />
 			</span>
 			<span className="flex min-w-0 flex-col">
 				<span className="truncate text-sm font-medium text-foreground">{displayName}</span>

@@ -12,6 +12,7 @@ from ._index_sweeper import IndexSweeper
 from ._index_task_consumer import IndexTaskConsumer
 from ._index_worker import IndexWorker
 from ._knowledge_base import KnowledgeBaseService
+from ._long_term_memory_browser import LongTermMemoryBrowser
 from ._model import get_model
 from ._tts_model import get_tts_model
 from ._session import SessionService, SessionStatus
@@ -28,6 +29,7 @@ __all__ = [
     "IndexWorker",
     "KnowledgeBaseService",
     "KnowledgeBaseView",
+    "LongTermMemoryBrowser",
     "ResourceAccessService",
     "SessionService",
     "SessionStatus",

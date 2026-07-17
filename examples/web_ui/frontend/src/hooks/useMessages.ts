@@ -160,6 +160,41 @@ export function useMessages(
 		});
 	}, []);
 
+	const applyPersistedMessages = useCallback(
+		(messages: Msg[], isRunning: boolean) => {
+			const tail = messages[messages.length - 1];
+			const shouldCloseStaleReply =
+				!isRunning &&
+				tail?.role === 'assistant' &&
+				!tail.finished_at &&
+				!hasPendingToolCall(tail);
+			const nextMessages = shouldCloseStaleReply
+				? messages.map((message, index) =>
+						index === messages.length - 1
+							? { ...message, finished_at: new Date().toISOString() }
+							: message,
+					)
+				: messages;
+			msgsRef.current = nextMessages;
+			const nextTail = nextMessages[nextMessages.length - 1];
+			const tailIsUnfinishedAssistant =
+				nextTail?.role === 'assistant' && !nextTail.finished_at;
+
+			if (isRunning || hasPendingToolCall(nextTail)) {
+				setPhase('streaming');
+				if (tailIsUnfinishedAssistant) {
+					currentReplyRef.current = nextTail;
+				}
+			} else {
+				clearInterruptTimer();
+				setPhase('idle');
+				currentReplyRef.current = null;
+			}
+			scheduleUpdate();
+		},
+		[clearInterruptTimer, scheduleUpdate],
+	);
+
 	/** Apply a single AgentEvent to the in-progress reply. */
 	const processEvent = useCallback(
 		(event: AgentEvent) => {
@@ -296,6 +331,19 @@ export function useMessages(
 			} catch (e) {
 				if ((e as Error).name !== 'AbortError' && !cancelled) {
 					setError(e as Error);
+					try {
+						const { messages, is_running } = await sessionApi.messages(
+							sessionId,
+							agentId,
+						);
+						if (!cancelled && !is_running) {
+							applyPersistedMessages(messages, is_running);
+						}
+					} catch {
+						// Keep the original stream error. The periodic
+						// reconciliation below retries while a reply still
+						// looks unfinished.
+					}
 				}
 			}
 		})();
@@ -306,7 +354,43 @@ export function useMessages(
 			abortRef.current = null;
 			clearInterruptTimer();
 		};
-	}, [agentId, sessionId, scheduleUpdate, processEvent, audioManager, clearInterruptTimer]);
+	}, [
+		agentId,
+		sessionId,
+		scheduleUpdate,
+		processEvent,
+		audioManager,
+		clearInterruptTimer,
+		applyPersistedMessages,
+	]);
+
+	const hasUnfinishedAssistant = msgs.some(
+		(message) => message.role === 'assistant' && !message.finished_at,
+	);
+
+	useEffect(() => {
+		if (!agentId || !sessionId || !hasUnfinishedAssistant) return;
+		let stopped = false;
+		const id = setInterval(() => {
+			void (async () => {
+				try {
+					const { messages, is_running } = await sessionApi.messages(
+						sessionId,
+						agentId,
+					);
+					if (!stopped && !is_running) {
+						applyPersistedMessages(messages, is_running);
+					}
+				} catch (e) {
+					if (!stopped) setError(e as Error);
+				}
+			})();
+		}, 5000);
+		return () => {
+			stopped = true;
+			clearInterval(id);
+		};
+	}, [agentId, sessionId, hasUnfinishedAssistant, applyPersistedMessages]);
 
 	/**
 	 * Send a user message. Appends the message to the local list

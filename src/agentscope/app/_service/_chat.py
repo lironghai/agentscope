@@ -18,7 +18,12 @@ from fastapi import HTTPException
 from .._bus_ops import enqueue_run_trigger, publish_session_event
 from ..message_bus import MessageBus, MessageBusKeys
 from ..rag.knowledge_base_manager import KnowledgeBaseManagerBase
-from ..storage import StorageBase, AgentRecord, SessionRecord
+from ..storage import (
+    ExecutionTraceRecord,
+    StorageBase,
+    AgentRecord,
+    SessionRecord,
+)
 from .._manager import BackgroundTaskManager, SchedulerManager
 from ..workspace_manager import WorkspaceManagerBase
 from ..middleware import (
@@ -40,11 +45,17 @@ from ._tts_model import get_tts_model
 from ._toolkit import get_toolkit
 from ._session_projection import SessionProjection
 from ._projectors import SubagentHitlProjector
+from ._execution_diagnostics import (
+    ExecutionTraceRecorder,
+    input_message_id_from_input,
+)
 
 from ..._logging import logger
 from ...agent import Agent, ModelConfig
 from ...event import (
     AgentEvent,
+    ReplyEndEvent,
+    ReplyEndReason,
     ReplyStartEvent,
     UserConfirmResultEvent,
     ExternalExecutionResultEvent,
@@ -158,6 +169,7 @@ class ChatService:
             SubagentHitlProjector(storage),
             *(extra_projectors or []),
         ]
+        self._active_trace_recorders = {}
 
     async def run(
         self,
@@ -210,7 +222,33 @@ class ChatService:
         """
         try:
             await self._run_impl(user_id, session_id, agent_id, input_msg)
+        except asyncio.CancelledError as e:
+            current_task = asyncio.current_task()
+            recorder = (
+                self._active_trace_recorders.pop(current_task, None)
+                if current_task is not None
+                else None
+            )
+            if (
+                recorder is not None
+                and recorder.trace.status == "running"
+            ):
+                recorder.finish("interrupted", e)
+                await recorder.safe_persist(logger)
+            raise
         except Exception as e:
+            current_task = asyncio.current_task()
+            recorder = (
+                self._active_trace_recorders.pop(current_task, None)
+                if current_task is not None
+                else None
+            )
+            if (
+                recorder is not None
+                and recorder.trace.status == "running"
+            ):
+                recorder.finish("error", e)
+                await recorder.safe_persist(logger)
             logger.exception(
                 "ChatService.run failed for user_id=%s session_id=%s "
                 "agent_id=%s, error=%s",
@@ -295,6 +333,39 @@ class ChatService:
         swallowing. Separated so the try/except doesn't bury the
         per-step logic at one extra indentation level."""
 
+        if (
+            isinstance(input_msg, UserConfirmResultEvent)
+            and await self._is_stale_user_confirmation(
+                user_id,
+                session_id,
+                agent_id,
+                input_msg,
+            )
+        ):
+            logger.info(
+                "Ignoring stale UserConfirmResultEvent for user_id=%s "
+                "session_id=%s agent_id=%s reply_id=%s.",
+                user_id,
+                session_id,
+                agent_id,
+                input_msg.reply_id,
+            )
+            return
+
+        recorder = ExecutionTraceRecorder(
+            self._storage,
+            trace=ExecutionTraceRecord(
+                user_id=user_id,
+                agent_id=agent_id,
+                session_id=session_id,
+                input_message_id=input_message_id_from_input(input_msg),
+            ),
+        )
+        await recorder.start()
+        current_task = asyncio.current_task()
+        if current_task is not None:
+            self._active_trace_recorders[current_task] = recorder
+
         # ----------------------------------------------------------------
         # 1. Load records + resolve workspace ONCE here, reused below.
         # Reject missing records up front with a clear error so the
@@ -306,17 +377,22 @@ class ChatService:
         # the agent is not visible to the caller.
         # ----------------------------------------------------------------
         try:
-            agent_record = await self._access.resolve_agent(user_id, agent_id)
+            async with recorder.stage("agent/team resolution"):
+                agent_record = await self._access.resolve_agent(
+                    user_id,
+                    agent_id,
+                )
         except HTTPException as exc:
             raise HTTPException(
                 status_code=404,
                 detail=f"Agent {agent_id!r} not found.",
             ) from exc
-        session_record = await self._storage.get_session(
-            user_id,
-            agent_id,
-            session_id,
-        )
+        async with recorder.stage("session load/input persistence"):
+            session_record = await self._storage.get_session(
+                user_id,
+                agent_id,
+                session_id,
+            )
         if session_record is None:
             raise HTTPException(
                 status_code=404,
@@ -325,12 +401,13 @@ class ChatService:
                     f"agent {agent_id!r}."
                 ),
             )
-        workspace = await self._workspace_manager.get_workspace(
-            user_id,
-            agent_id,
-            session_id,
-            session_record.config.workspace_id,
-        )
+        async with recorder.stage("workspace resolution"):
+            workspace = await self._workspace_manager.get_workspace(
+                user_id,
+                agent_id,
+                session_id,
+                session_record.config.workspace_id,
+            )
 
         # Add workspace working directory to the permission context
         if (
@@ -351,6 +428,7 @@ class ChatService:
         # (any process) wakes an idle session — no in-process retrigger
         # plumbing is needed here.
         # ----------------------------------------------------------------
+        middleware_stage = recorder.begin_stage("RAG/middleware setup")
         middlewares: list = [
             InboxMiddleware(self._message_bus),
             StateChangeMiddleware(
@@ -438,62 +516,67 @@ class ChatService:
                         ),
                     ),
                 )
+        recorder.complete_stage(middleware_stage)
 
         # ----------------------------------------------------------------
         # 3. Toolkit (workspace tools + planning + ToolStop + schedule +
         # team + extras + skills + mcps).
         # ----------------------------------------------------------------
-        toolkit = await get_toolkit(
-            storage=self._storage,
-            workspace=workspace,
-            workspace_manager=self._workspace_manager,
-            scheduler_manager=self._scheduler_manager,
-            background_task_manager=self._background_task_manager,
-            message_bus=self._message_bus,
-            middlewares=middlewares,
-            user_id=user_id,
-            agent_record=agent_record,
-            session_record=session_record,
-            resource_access_service=self._access,
-            extra_factory=self._extra_agent_tools,
-            sub_agent_templates=self._sub_agent_templates,
-        )
+        async with recorder.stage("toolkit construction"):
+            toolkit = await get_toolkit(
+                storage=self._storage,
+                workspace=workspace,
+                workspace_manager=self._workspace_manager,
+                scheduler_manager=self._scheduler_manager,
+                background_task_manager=self._background_task_manager,
+                message_bus=self._message_bus,
+                middlewares=middlewares,
+                user_id=user_id,
+                agent_record=agent_record,
+                session_record=session_record,
+                resource_access_service=self._access,
+                extra_factory=self._extra_agent_tools,
+                sub_agent_templates=self._sub_agent_templates,
+            )
 
         # ----------------------------------------------------------------
         # 4. Model + fallback (resolved from session's config).
         # ----------------------------------------------------------------
-        model_cfg = session_record.config.chat_model_config
-        if not model_cfg:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No model configuration found for agent {agent_id}",
-            )
-        model = await get_model(user_id, model_cfg, self._access)
+        async with recorder.stage("model resolution"):
+            model_cfg = session_record.config.chat_model_config
+            if not model_cfg:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No model configuration found for agent {agent_id}",
+                )
+            model = await get_model(user_id, model_cfg, self._access)
 
-        fallback_cfg = session_record.config.fallback_chat_model_config
-        fallback_model = (
-            await get_model(user_id, fallback_cfg, self._access)
-            if fallback_cfg is not None
-            else None
-        )
+            fallback_cfg = session_record.config.fallback_chat_model_config
+            recorder.set_models(model_cfg, fallback_cfg)
+            fallback_model = (
+                await get_model(user_id, fallback_cfg, self._access)
+                if fallback_cfg is not None
+                else None
+            )
 
         # ----------------------------------------------------------------
         # 5. Assemble the Agent.
         # ----------------------------------------------------------------
-        agent_state = session_record.state
-        agent_state.session_id = session_id
-        agent = self._agent_cls(
-            name=agent_record.data.name,
-            system_prompt=agent_record.data.system_prompt,
-            model=model,
-            toolkit=toolkit,
-            model_config=ModelConfig(fallback_model=fallback_model),
-            context_config=agent_record.data.context_config,
-            react_config=agent_record.data.react_config,
-            state=agent_state,
-            middlewares=middlewares,
-            offloader=workspace,
-        )
+        async with recorder.stage("agent assembly"):
+            agent_state = session_record.state
+            agent_state.session_id = session_id
+            agent = self._agent_cls(
+                name=agent_record.data.name,
+                system_prompt=agent_record.data.system_prompt,
+                model=model,
+                toolkit=toolkit,
+                model_config=ModelConfig(fallback_model=fallback_model),
+                context_config=agent_record.data.context_config,
+                react_config=agent_record.data.react_config,
+                state=agent_state,
+                middlewares=middlewares,
+                offloader=workspace,
+            )
 
         # ----------------------------------------------------------------
         # 6. Guard: skip wake-up driven runs when the agent is parked on
@@ -528,6 +611,10 @@ class ChatService:
                         session_id,
                         len(awaiting),
                     )
+                    recorder.finish("completed")
+                    await recorder.safe_persist(logger)
+                    if current_task is not None:
+                        self._active_trace_recorders.pop(current_task, None)
                     return
 
         # ----------------------------------------------------------------
@@ -540,6 +627,7 @@ class ChatService:
             ttl_secs=MessageBusKeys.SESSION_RUN_TTL_SECS,
         ):
             reply_msg: Msg | None = None
+            event_loop_stage: dict | None = None
             try:
                 if input_msg is None or isinstance(input_msg, (Msg, list)):
                     # Case A: new reply (user message(s), or retrigger with
@@ -557,7 +645,11 @@ class ChatService:
                                 msg,
                             )
 
+                    event_loop_stage = recorder.begin_stage(
+                        "agent reply event loop",
+                    )
                     async for event in agent.reply_stream(inputs=input_msg):
+                        recorder.record_event(event)
                         # Apply to reply_msg FIRST (sync — never
                         # interrupted), so an interrupt in the awaits below
                         # can't lose this event.
@@ -590,6 +682,13 @@ class ChatService:
                             current = asyncio.current_task()
                             if current is not None:
                                 current.cancel()
+                        except Exception as exc:
+                            recorder.record_publish_error(exc)
+                            recorder.finish("error", exc)
+                            await recorder.safe_persist(logger)
+                            raise
+                    recorder.complete_stage(event_loop_stage)
+                    event_loop_stage = None
 
                 else:
                     # Case B: continuation (UserConfirmResult
@@ -609,9 +708,14 @@ class ChatService:
                             session_id,
                         )
                     elif input_msg:
+                        recorder.record_event(input_msg)
                         reply_msg.append_event(input_msg)
 
+                    event_loop_stage = recorder.begin_stage(
+                        "agent reply event loop",
+                    )
                     async for event in agent.reply_stream(inputs=input_msg):
+                        recorder.record_event(event)
                         # Apply to the persisted reply FIRST (synchronous),
                         # then publish/project — see Case A above.
                         if reply_msg is not None:
@@ -634,7 +738,29 @@ class ChatService:
                             current = asyncio.current_task()
                             if current is not None:
                                 current.cancel()
+                        except Exception as exc:
+                            recorder.record_publish_error(exc)
+                            recorder.finish("error", exc)
+                            await recorder.safe_persist(logger)
+                            raise
+                    recorder.complete_stage(event_loop_stage)
+                    event_loop_stage = None
 
+            except Exception as exc:
+                if event_loop_stage is not None:
+                    recorder.complete_stage(event_loop_stage, "error", exc)
+                    event_loop_stage = None
+                if reply_msg is not None and reply_msg.finished_at is None:
+                    reply_msg.append_event(
+                        ReplyEndEvent(
+                            session_id=session_id,
+                            reply_id=reply_msg.id,
+                            finished_reason=ReplyEndReason.INTERRUPTED,
+                        ),
+                    )
+                recorder.finish("error", exc)
+                await recorder.safe_persist(logger)
+                raise
             finally:
                 # All persistence in a single coroutine, shielded from
                 # outer cancellation.  Must complete BEFORE the session
@@ -642,19 +768,21 @@ class ChatService:
                 # acquire the lock and load a stale state from storage
                 # before this write lands.
                 async def _persist() -> None:
-                    if reply_msg is not None:
-                        await self._storage.upsert_message(
-                            user_id,
-                            session_id,
-                            reply_msg,
+                    async with recorder.stage("final message persistence"):
+                        if reply_msg is not None:
+                            await self._storage.upsert_message(
+                                user_id,
+                                session_id,
+                                reply_msg,
+                            )
+                    async with recorder.stage("state persistence"):
+                        await self._storage.update_session_state(
+                            user_id=user_id,
+                            agent_id=agent_id,
+                            session_id=session_id,
+                            state=agent.state,
                         )
-                    await self._storage.update_session_state(
-                        user_id=user_id,
-                        agent_id=agent_id,
-                        session_id=session_id,
-                        state=agent.state,
-                    )
-                    await self._message_bus.log_trim(events_key)
+                        await self._message_bus.log_trim(events_key)
 
                 persist_task = asyncio.create_task(_persist())
                 try:
@@ -665,6 +793,57 @@ class ChatService:
                     # propagate to honour asyncio semantics.
                     await persist_task
                     raise
+
+        recorder.finish("completed")
+        await recorder.safe_persist(logger)
+        if current_task is not None:
+            self._active_trace_recorders.pop(current_task, None)
+
+    async def _is_stale_user_confirmation(
+        self,
+        user_id: str,
+        session_id: str,
+        agent_id: str,
+        event: UserConfirmResultEvent,
+    ) -> bool:
+        """Return whether a confirmation targets an already-handled reply."""
+        session = await self._storage.get_session(user_id, agent_id, session_id)
+        if session is None:
+            return False
+
+        reply = await self._storage.get_message(
+            user_id,
+            session_id,
+            event.reply_id,
+        )
+        if reply is None:
+            return False
+
+        if session.state.context:
+            last_msg = session.state.context[-1]
+            if last_msg.role == "assistant":
+                result_ids = {
+                    block.id
+                    for block in last_msg.get_content_blocks("tool_result")
+                }
+                awaiting_outside_input = any(
+                    tool_call.state == ToolCallState.ASKING
+                    or (
+                        tool_call.state == ToolCallState.SUBMITTED
+                        and tool_call.id not in result_ids
+                    )
+                    for tool_call in last_msg.get_content_blocks("tool_call")
+                )
+                return not awaiting_outside_input
+
+        if reply.finished_at is None:
+            return False
+
+        awaiting_confirmation = any(
+            tool_call.state == ToolCallState.ASKING
+            for tool_call in reply.get_content_blocks("tool_call")
+        )
+        return not awaiting_confirmation
 
     async def _project_event(
         self,

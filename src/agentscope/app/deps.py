@@ -11,6 +11,7 @@ from ._manager import (
 from ._service import (
     ChatService,
     KnowledgeBaseService,
+    LongTermMemoryBrowser,
     ResourceAccessService,
     SessionService,
 )
@@ -111,6 +112,26 @@ async def get_session_service(request: Request) -> SessionService:
         ``app.state``.
     """
     return request.app.state.session_service
+
+
+async def get_long_term_memory_browser(
+    request: Request,
+) -> LongTermMemoryBrowser:
+    """Return the configured long-term memory browser.
+
+    Raises:
+        `HTTPException`: 503 if memory browsing is not configured.
+    """
+    browser = getattr(request.app.state, "long_term_memory_browser", None)
+    if browser is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Long-term memory browser is disabled; pass "
+                "long_term_memory_browser to create_app() to enable it."
+            ),
+        )
+    return browser
 
 
 async def get_chat_run_registry(request: Request) -> ChatRunRegistry:

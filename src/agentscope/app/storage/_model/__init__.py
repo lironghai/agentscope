@@ -3,6 +3,7 @@
 
 from ._agent import AgentRecord, AgentData, InviteConfig
 from ._credential import CredentialRecord
+from ._execution_trace import ExecutionTraceRecord, ExecutionTraceStatus
 from ._knowledge_base import KnowledgeBaseRecord
 from ._knowledge_document import (
     KnowledgeDocumentData,
@@ -26,6 +27,8 @@ __all__ = [
     "AgentData",
     "AgentRecord",
     "CredentialRecord",
+    "ExecutionTraceRecord",
+    "ExecutionTraceStatus",
     "KnowledgeBaseRecord",
     "KnowledgeDocumentData",
     "KnowledgeDocumentRecord",

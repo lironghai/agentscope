@@ -108,7 +108,8 @@
 			"tool_output": "工具输出",
 			"team_message": "团队消息",
 			"schedule": "定时任务"
-		}
+		},
+		"openDiagnostics": "打开执行诊断"
 	},
 	"chat": {
 		"inputPlaceholder": "输入消息...",
@@ -579,7 +580,24 @@
 			"emptyTitle": "无结果",
 			"emptyDescription": "没有匹配 “{{query}}” 的结果。"
 		},
-		"loading": "加载中…"
+		"loading": "加载中…",
+		"memory": {
+			"title": "记忆",
+			"refresh": "刷新记忆文件",
+			"dirty": "未保存",
+			"saved": "记忆文件已保存",
+			"unavailableTitle": "记忆后端不可用",
+			"unavailableDescription": "当前会话不可使用这个记忆后端。",
+			"emptyTitle": "暂无记忆文件",
+			"emptyDescription": "当前后端没有可浏览的记忆文件。",
+			"noFileSelected": "未选择文件",
+			"selectFile": "选择文件以预览或编辑。",
+			"backend": {
+				"agentic": "Agentic",
+				"reme": "ReMe",
+				"mem0": "Mem0"
+			}
+		}
 	},
 	"team-sidebar": {
 		"membersHeading": "成员",
@@ -587,5 +605,24 @@
 		"running": "运行中",
 		"idle": "空闲",
 		"missingSession": "（无会话）"
+	},
+	"diagnostics": {
+		"title": "执行诊断",
+		"noReply": "未选择回复",
+		"emptyTitle": "暂无诊断",
+		"emptyDescription": "未找到这条回复的执行 trace。",
+		"emptySection": "暂无数据。",
+		"summary": "摘要",
+		"status": "状态",
+		"duration": "耗时",
+		"model": "模型",
+		"fallbackModel": "备用模型",
+		"provider": "提供方",
+		"inputTokens": "输入",
+		"outputTokens": "输出",
+		"error": "错误",
+		"stages": "阶段",
+		"toolCalls": "工具调用",
+		"events": "事件"
 	}
 }

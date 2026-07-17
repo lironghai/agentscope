@@ -196,6 +196,64 @@ export interface SessionListResponse {
 	total: number;
 }
 
+export type ExecutionTraceStatus = 'running' | 'completed' | 'interrupted' | 'error';
+
+export interface ExecutionTraceRecord extends RecordBase {
+	user_id: string;
+	agent_id: string;
+	session_id: string;
+	reply_id: string | null;
+	input_message_id: string | null;
+	status: ExecutionTraceStatus;
+	started_at: string | null;
+	finished_at: string | null;
+	duration_ms: number | null;
+	usage: Record<string, number> | null;
+	model: Record<string, unknown> | null;
+	fallback_model: Record<string, unknown> | null;
+	error: Record<string, unknown> | null;
+	stages: Array<Record<string, unknown>>;
+	events: Array<Record<string, unknown>>;
+	tool_calls: Array<Record<string, unknown>>;
+}
+
+export interface ListExecutionTracesResponse {
+	traces: ExecutionTraceRecord[];
+	total: number;
+}
+
+export type MemoryBackend = 'agentic' | 'reme' | 'mem0';
+
+export type MemoryEntryType = 'file' | 'directory';
+
+export interface MemoryTreeEntry {
+	path: string;
+	name: string;
+	type: MemoryEntryType;
+	size: number | null;
+	editable: boolean;
+	readonly: boolean;
+}
+
+export interface MemoryTreeResponse {
+	backend: MemoryBackend;
+	exists: boolean;
+	entries: MemoryTreeEntry[];
+}
+
+export interface MemoryFileResponse {
+	backend: MemoryBackend;
+	path: string;
+	content: string;
+	size: number;
+	editable: boolean;
+	readonly: boolean;
+}
+
+export interface UpdateMemoryFileRequest {
+	content: string;
+}
+
 /**
  * Response body for `GET /schedule/{id}/sessions`. Returns plain
  * `SessionRecord[]` (no team / is_running enrichment) because

@@ -67,6 +67,9 @@ service = [
 storage = [
     "redis",
 ]
+postgres = [
+    "asyncpg>=0.29.0",
+]
 # ------------ Workspace -----------
 k8s = ["kubernetes-asyncio"]
 workspace = [
@@ -125,6 +128,7 @@ full = [
     "agentscope[rag]",
     "agentscope[milvuslite]",
     "agentscope[mongodb]",
+    "agentscope[postgres]",
     "agentscope[s3]",
     "agentscope[mem0]",
     "agentscope[reme]",

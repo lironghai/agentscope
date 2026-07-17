@@ -29,6 +29,31 @@ import { useTranslation } from '@/i18n/useI18n.ts';
 
 type Status = 'idle' | 'loading' | 'success' | 'error';
 
+const HTTP_MCP_EXAMPLE = `{
+  "mcpServers": {
+    "contextforge-http": {
+      "url": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer <token>"
+      },
+      "timeout": 30
+    }
+  }
+}`;
+
+const MCP_CONFIG_PLACEHOLDER = `HTTP / Streamable HTTP:
+${HTTP_MCP_EXAMPLE}
+
+STDIO:
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"]
+    }
+  }
+}`;
+
 interface Props {
 	children: ReactNode;
 	onAdd: (mcps: MCPClient[]) => Promise<void>;
@@ -82,14 +107,14 @@ function parseMcpConfig(
 export const CreateMCPDialog = ({ children, onAdd }: Props) => {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
-	const [configValue, setConfigValue] = useState('');
-	const [keepAlive, setKeepAlive] = useState(true);
+	const [configValue, setConfigValue] = useState(HTTP_MCP_EXAMPLE);
+	const [keepAlive, setKeepAlive] = useState(false);
 	const [status, setStatus] = useState<Status>('idle');
 	const [errorMsg, setErrorMsg] = useState('');
 
 	const reset = useCallback(() => {
-		setConfigValue('');
-		setKeepAlive(true);
+		setConfigValue(HTTP_MCP_EXAMPLE);
+		setKeepAlive(false);
 		setStatus('idle');
 		setErrorMsg('');
 	}, []);
@@ -150,9 +175,7 @@ export const CreateMCPDialog = ({ children, onAdd }: Props) => {
 									className="max-h-100"
 									value={configValue}
 									onChange={(e) => setConfigValue(e.target.value)}
-									placeholder={
-										'{\n  "mcpServers": {\n    "playwright": {\n      "command": "npx",\n      "args": ["@playwright/mcp@latest"]\n    }\n  }\n}'
-									}
+									placeholder={MCP_CONFIG_PLACEHOLDER}
 								/>
 							</InputGroup>
 						</Field>

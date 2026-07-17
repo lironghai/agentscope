@@ -1,6 +1,6 @@
 import type { ContentBlock, Msg, ToolCallBlock } from '@agentscope-ai/agentscope/message';
 import React from 'react';
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useLayoutEffect } from 'react';
 
 import { EmptyMessage } from './Empty';
 import { MessageBubble } from '@/components/chat/MessageBubble';
@@ -9,6 +9,7 @@ import type { ReplyPhase } from '@/hooks/useMessages';
 import { cn } from '@/lib/utils';
 
 interface ChatContentProps {
+	sessionId: string | null;
 	msgs: Msg[];
 	/**
 	 * Reply lifecycle phase from ``useMessages`` — forwarded to
@@ -24,6 +25,7 @@ interface ChatContentProps {
 		replyId: string,
 		rules?: ToolCallBlock['suggested_rules'],
 	) => void;
+	onOpenDiagnostics?: (replyId: string) => void;
 	autoComplete?: (input: string) => string | null;
 	className?: string;
 	/** Called when the user clicks the stop button. */
@@ -48,25 +50,50 @@ const ChatContentComponent: React.FC<ChatContentProps> = ({
 	disabled,
 	onSend,
 	onUserConfirm,
+	onOpenDiagnostics,
 	autoComplete,
 	className,
 	onInterrupt,
 	footerSlot,
 	allowedInputTypes,
 	fileProcessor,
+	sessionId,
 }) => {
 	const scrollAreaRef = useRef<HTMLDivElement>(null);
+	const currentSessionIdRef = useRef<string | null>(null);
 	const prevMsgCountRef = useRef<number>(0);
 	const wasNearBottomRef = useRef<boolean>(true);
+	const pendingSessionScrollRef = useRef<boolean>(true);
+	const waitingForSessionMessagesRef = useRef<boolean>(false);
 
-	// Auto-scroll to bottom only if user is already near the bottom
-	useEffect(() => {
+	// Auto-scroll to bottom on session load, and after that only if the
+	// user is already near the bottom.
+	useLayoutEffect(() => {
 		const currentCount = msgs.length;
+		if (currentSessionIdRef.current !== sessionId) {
+			currentSessionIdRef.current = sessionId;
+			pendingSessionScrollRef.current = true;
+			waitingForSessionMessagesRef.current = currentCount > 0;
+			prevMsgCountRef.current = 0;
+			wasNearBottomRef.current = true;
+		}
+
 		const prevCount = prevMsgCountRef.current;
+		if (pendingSessionScrollRef.current && waitingForSessionMessagesRef.current) {
+			if (currentCount === 0) {
+				waitingForSessionMessagesRef.current = false;
+				prevMsgCountRef.current = 0;
+			}
+			return;
+		}
+
+		const shouldScrollForSession = pendingSessionScrollRef.current && currentCount > 0;
 
 		const isActive = phase !== 'idle';
 		const shouldCheck =
-			(currentCount > prevCount && prevCount > 0) || (isActive && prevCount > 0);
+			shouldScrollForSession ||
+			(currentCount > prevCount && prevCount > 0) ||
+			(isActive && prevCount > 0);
 
 		if (shouldCheck && scrollAreaRef.current) {
 			const { scrollHeight } = scrollAreaRef.current;
@@ -74,16 +101,17 @@ const ChatContentComponent: React.FC<ChatContentProps> = ({
 			// Check if user was near bottom before content changed
 			const isNearBottom = wasNearBottomRef.current;
 
-			if (isNearBottom) {
+			if (shouldScrollForSession || isNearBottom) {
 				scrollAreaRef.current.scrollTo({
 					top: scrollHeight,
-					behavior: 'smooth',
+					behavior: shouldScrollForSession ? 'auto' : 'smooth',
 				});
+				pendingSessionScrollRef.current = false;
 			}
 		}
 
 		prevMsgCountRef.current = currentCount;
-	}, [msgs, phase]);
+	}, [msgs, phase, sessionId]);
 
 	// Track if user is near bottom whenever they scroll
 	useEffect(() => {
@@ -112,6 +140,9 @@ const ChatContentComponent: React.FC<ChatContentProps> = ({
 								key={message.id}
 								message={message}
 								onUserConfirm={onUserConfirm}
+								onOpenDiagnostics={
+									message.role === 'assistant' ? onOpenDiagnostics : undefined
+								}
 							/>
 						))
 					) : (

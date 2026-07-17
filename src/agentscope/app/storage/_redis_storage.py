@@ -19,6 +19,7 @@ from ._model import (
     SessionConfig,
     SessionSource,
     TeamRecord,
+    ExecutionTraceRecord,
 )
 from ._utils import _dump_with_secrets
 from ...credential import CredentialBase
@@ -76,6 +77,18 @@ class RedisStorage(StorageBase):
         # Message list key (Redis List — ordered message history per session)
         messages: str = (
             "agentscope:user:{user_id}:session:{session_id}:messages"
+        )
+
+        execution_trace_index: str = (
+            "agentscope:user:{user_id}:session:{session_id}:execution_traces"
+        )
+        execution_trace: str = (
+            "agentscope:user:{user_id}:session:{session_id}"
+            ":execution_trace:{trace_id}"
+        )
+        reply_trace: str = (
+            "agentscope:user:{user_id}:session:{session_id}"
+            ":reply_trace:{reply_id}"
         )
 
         schedule: str = "agentscope:user:{user_id}:schedule:{schedule_id}"
@@ -706,7 +719,10 @@ class RedisStorage(StorageBase):
         raw = await self._client.get(key)
         if not raw:
             return None
-        return SessionRecord.model_validate_json(raw)
+        record = SessionRecord.model_validate_json(raw)
+        if agent_id and record.agent_id != agent_id:
+            return None
+        return record
 
     async def delete_session(
         self,
@@ -779,6 +795,7 @@ class RedisStorage(StorageBase):
         await self._client.delete(key)
         await self._client.srem(index_key, session_id)
         await self._client.delete(msg_key)
+        await self.delete_execution_traces(user_id, session_id)
 
         if record.source_schedule_id:
             schedule_session_key = self._key(
@@ -999,6 +1016,169 @@ class RedisStorage(StorageBase):
         key = self._message_key(user_id, session_id)
         raw_list = await self._client.lrange(key, offset, offset + limit - 1)
         return [Msg.model_validate_json(raw) for raw in raw_list]
+
+    # ------------------------------------------------------------------
+    # Execution trace persistence
+    # ------------------------------------------------------------------
+
+    def _execution_trace_index_key(
+        self,
+        user_id: str,
+        session_id: str,
+    ) -> str:
+        """Return the Redis Set key for a session's execution traces."""
+        return self._key(
+            self.key_config.execution_trace_index,
+            user_id=user_id,
+            session_id=session_id,
+        )
+
+    def _execution_trace_key(
+        self,
+        user_id: str,
+        session_id: str,
+        trace_id: str,
+    ) -> str:
+        """Return the Redis key for one execution trace."""
+        return self._key(
+            self.key_config.execution_trace,
+            user_id=user_id,
+            session_id=session_id,
+            trace_id=trace_id,
+        )
+
+    def _reply_trace_key(
+        self,
+        user_id: str,
+        session_id: str,
+        reply_id: str,
+    ) -> str:
+        """Return the Redis lookup key from reply id to trace id."""
+        return self._key(
+            self.key_config.reply_trace,
+            user_id=user_id,
+            session_id=session_id,
+            reply_id=reply_id,
+        )
+
+    async def upsert_execution_trace(
+        self,
+        user_id: str,
+        session_id: str,
+        trace: ExecutionTraceRecord,
+    ) -> ExecutionTraceRecord:
+        """Create or update an execution trace record."""
+        if trace.user_id != user_id or trace.session_id != session_id:
+            raise ValueError(
+                "Execution trace owner/session does not match storage key.",
+            )
+        key = self._execution_trace_key(
+            user_id,
+            session_id,
+            trace.id,
+        )
+        raw = await self._client.get(key)
+        if raw:
+            existing = ExecutionTraceRecord.model_validate_json(raw)
+            if existing.reply_id and existing.reply_id != trace.reply_id:
+                await self._client.delete(
+                    self._reply_trace_key(
+                        user_id,
+                        session_id,
+                        existing.reply_id,
+                    ),
+                )
+            trace.created_at = existing.created_at
+        trace.updated_at = datetime.now()
+
+        await self._set_with_ttl(key, trace.model_dump_json())
+        await self._client.sadd(
+            self._execution_trace_index_key(user_id, session_id),
+            trace.id,
+        )
+        if trace.reply_id:
+            await self._set_with_ttl(
+                self._reply_trace_key(
+                    user_id,
+                    session_id,
+                    trace.reply_id,
+                ),
+                trace.id,
+            )
+        return trace
+
+    async def get_execution_trace(
+        self,
+        user_id: str,
+        session_id: str,
+        trace_id: str,
+    ) -> ExecutionTraceRecord | None:
+        """Fetch a single execution trace by id."""
+        raw = await self._client.get(
+            self._execution_trace_key(user_id, session_id, trace_id),
+        )
+        return ExecutionTraceRecord.model_validate_json(raw) if raw else None
+
+    async def get_execution_trace_by_reply(
+        self,
+        user_id: str,
+        session_id: str,
+        reply_id: str,
+    ) -> ExecutionTraceRecord | None:
+        """Fetch a single execution trace by reply id."""
+        trace_id = await self._client.get(
+            self._reply_trace_key(user_id, session_id, reply_id),
+        )
+        if not trace_id:
+            return None
+        return await self.get_execution_trace(user_id, session_id, trace_id)
+
+    async def list_execution_traces(
+        self,
+        user_id: str,
+        session_id: str,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> list[ExecutionTraceRecord]:
+        """Return execution traces for a session, newest first."""
+        ids = await self._client.smembers(
+            self._execution_trace_index_key(user_id, session_id),
+        )
+        records: list[ExecutionTraceRecord] = []
+        for trace_id in ids:
+            raw = await self._client.get(
+                self._execution_trace_key(user_id, session_id, trace_id),
+            )
+            if raw:
+                records.append(ExecutionTraceRecord.model_validate_json(raw))
+        records.sort(key=lambda r: r.created_at, reverse=True)
+        return records[offset : offset + limit]
+
+    async def delete_execution_traces(
+        self,
+        user_id: str,
+        session_id: str,
+    ) -> int:
+        """Delete all execution traces for a session."""
+        index_key = self._execution_trace_index_key(user_id, session_id)
+        ids = await self._client.smembers(index_key)
+        deleted = 0
+        for trace_id in ids:
+            key = self._execution_trace_key(user_id, session_id, trace_id)
+            raw = await self._client.get(key)
+            if raw:
+                record = ExecutionTraceRecord.model_validate_json(raw)
+                if record.reply_id:
+                    await self._client.delete(
+                        self._reply_trace_key(
+                            user_id,
+                            session_id,
+                            record.reply_id,
+                        ),
+                    )
+            deleted += await self._client.delete(key)
+        await self._client.delete(index_key)
+        return deleted
 
     # ------------------------------------------------------------------
     # Team persistence

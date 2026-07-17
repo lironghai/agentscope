@@ -12,6 +12,7 @@ from ..access import ResourceKind
 from ..deps import (
     get_chat_service,
     get_current_user_id,
+    get_long_term_memory_browser,
     get_message_bus,
     get_resource_access_service,
     get_session_service,
@@ -22,6 +23,9 @@ from ._schema import (
     CreateSessionRequest,
     CreateSessionResponse,
     InterruptSessionResponse,
+    ListExecutionTracesResponse,
+    MemoryFileResponse,
+    MemoryTreeResponse,
     ListMessagesResponse,
     ListSessionsResponse,
     SessionStatusResponse,
@@ -29,18 +33,21 @@ from ._schema import (
     TeamDetailResponse,
     TeamMemberView,
     UpdateSessionRequest,
+    UpdateMemoryFileRequest,
 )
 from ..message_bus import MessageBus, MessageBusKeys
 from .._service import (
     AgentView,
     ResourceAccessService,
     ChatService,
+    LongTermMemoryBrowser,
     SessionService,
     SessionProjection,
     SubagentHitlProjector,
 )
 from ..storage import (
     ChatModelConfig,
+    ExecutionTraceRecord,
     SessionKnowledgeConfig,
     TTSModelConfig,
     SessionConfig,
@@ -613,6 +620,204 @@ async def get_session_status(
         session_id=session_id,
         status=session_status,
     )
+
+
+# ----------------------------------------------------------------------
+# Shared session ownership guard
+# ----------------------------------------------------------------------
+
+
+async def _ensure_owned_session(
+    storage: StorageBase,
+    user_id: str,
+    agent_id: str,
+    session_id: str,
+) -> None:
+    """Validate that a session belongs to the current user and agent."""
+    existing = await storage.get_session(user_id, agent_id, session_id)
+    if existing is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session '{session_id}' not found.",
+        )
+
+
+# ----------------------------------------------------------------------
+# Memory browser: long-term memory files authorized through session ownership
+# ----------------------------------------------------------------------
+
+
+@session_router.get(
+    "/{session_id}/memory/tree",
+    response_model=MemoryTreeResponse,
+    summary="List session memory files",
+)
+async def list_session_memory_tree(
+    session_id: str,
+    agent_id: str = Query(
+        min_length=1,
+        description="Agent the session belongs to.",
+    ),
+    backend: str = Query(
+        description="Memory backend: agentic, reme, or mem0.",
+    ),
+    user_id: str = Depends(get_current_user_id),
+    storage: StorageBase = Depends(get_storage),
+    browser: LongTermMemoryBrowser = Depends(get_long_term_memory_browser),
+) -> MemoryTreeResponse:
+    """List files and directories under one memory backend."""
+    await _ensure_owned_session(storage, user_id, agent_id, session_id)
+    return MemoryTreeResponse.model_validate(
+        browser.list_tree(user_id, agent_id, session_id, backend),
+    )
+
+
+# ----------------------------------------------------------------------
+# Diagnostics: persisted execution traces for a session
+# ----------------------------------------------------------------------
+
+
+@session_router.get(
+    "/{session_id}/memory/file",
+    response_model=MemoryFileResponse,
+    summary="Read a session memory file",
+)
+async def get_session_memory_file(
+    session_id: str,
+    agent_id: str = Query(
+        min_length=1,
+        description="Agent the session belongs to.",
+    ),
+    backend: str = Query(
+        description="Memory backend: agentic, reme, or mem0.",
+    ),
+    path: str = Query(description="Path relative to the backend root."),
+    user_id: str = Depends(get_current_user_id),
+    storage: StorageBase = Depends(get_storage),
+    browser: LongTermMemoryBrowser = Depends(get_long_term_memory_browser),
+) -> MemoryFileResponse:
+    """Read one memory file after validating session ownership."""
+    await _ensure_owned_session(storage, user_id, agent_id, session_id)
+    return MemoryFileResponse.model_validate(
+        browser.read_file(user_id, agent_id, session_id, backend, path),
+    )
+
+
+@session_router.put(
+    "/{session_id}/memory/file",
+    response_model=MemoryFileResponse,
+    summary="Update a session memory file",
+)
+async def update_session_memory_file(
+    session_id: str,
+    body: UpdateMemoryFileRequest,
+    agent_id: str = Query(
+        min_length=1,
+        description="Agent the session belongs to.",
+    ),
+    backend: str = Query(
+        description="Memory backend: agentic, reme, or mem0.",
+    ),
+    path: str = Query(description="Path relative to the backend root."),
+    user_id: str = Depends(get_current_user_id),
+    storage: StorageBase = Depends(get_storage),
+    browser: LongTermMemoryBrowser = Depends(get_long_term_memory_browser),
+) -> MemoryFileResponse:
+    """Update one editable memory file after validating ownership."""
+    await _ensure_owned_session(storage, user_id, agent_id, session_id)
+    return MemoryFileResponse.model_validate(
+        browser.write_file(
+            user_id,
+            agent_id,
+            session_id,
+            backend,
+            path,
+            body.content,
+        ),
+    )
+
+
+@session_router.get(
+    "/{session_id}/diagnostics",
+    response_model=ListExecutionTracesResponse,
+    summary="List execution diagnostics for a session",
+)
+async def list_session_diagnostics(
+    session_id: str,
+    agent_id: str = Query(
+        min_length=1,
+        description="Agent the session belongs to.",
+    ),
+    offset: int = Query(0, ge=0, description="Pagination offset."),
+    limit: int = Query(50, ge=1, le=200, description="Max traces."),
+    user_id: str = Depends(get_current_user_id),
+    storage: StorageBase = Depends(get_storage),
+) -> ListExecutionTracesResponse:
+    """Return persisted execution traces for an owned session."""
+    await _ensure_owned_session(storage, user_id, agent_id, session_id)
+    traces = await storage.list_execution_traces(
+        user_id,
+        session_id,
+        offset=offset,
+        limit=limit,
+    )
+    return ListExecutionTracesResponse(traces=traces, total=len(traces))
+
+
+@session_router.get(
+    "/{session_id}/diagnostics/by-reply/{reply_id}",
+    response_model=ExecutionTraceRecord,
+    summary="Get execution diagnostics by reply id",
+)
+async def get_session_diagnostics_by_reply(
+    session_id: str,
+    reply_id: str,
+    agent_id: str = Query(
+        min_length=1,
+        description="Agent the session belongs to.",
+    ),
+    user_id: str = Depends(get_current_user_id),
+    storage: StorageBase = Depends(get_storage),
+) -> ExecutionTraceRecord:
+    """Return one execution trace for an owned session by reply id."""
+    await _ensure_owned_session(storage, user_id, agent_id, session_id)
+    trace = await storage.get_execution_trace_by_reply(
+        user_id,
+        session_id,
+        reply_id,
+    )
+    if trace is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Execution trace for reply '{reply_id}' not found.",
+        )
+    return trace
+
+
+@session_router.get(
+    "/{session_id}/diagnostics/{trace_id}",
+    response_model=ExecutionTraceRecord,
+    summary="Get execution diagnostics by trace id",
+)
+async def get_session_diagnostics(
+    session_id: str,
+    trace_id: str,
+    agent_id: str = Query(
+        min_length=1,
+        description="Agent the session belongs to.",
+    ),
+    user_id: str = Depends(get_current_user_id),
+    storage: StorageBase = Depends(get_storage),
+) -> ExecutionTraceRecord:
+    """Return one execution trace for an owned session by trace id."""
+    await _ensure_owned_session(storage, user_id, agent_id, session_id)
+    trace = await storage.get_execution_trace(user_id, session_id, trace_id)
+    if trace is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Execution trace '{trace_id}' not found.",
+        )
+    return trace
 
 
 # ----------------------------------------------------------------------

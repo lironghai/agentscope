@@ -98,14 +98,20 @@ async function streamRequest(
 }
 
 export const client = {
-	get: <T>(path: string, params?: Record<string, string>) =>
-		request<T>(path, { method: 'GET', params }),
+	get: <T>(path: string, params?: Record<string, string>, options?: { silent?: boolean }) =>
+		request<T>(path, { method: 'GET', params, silent: options?.silent }),
 	post: <T>(
 		path: string,
 		body?: unknown,
 		params?: Record<string, string>,
 		options?: { silent?: boolean },
 	) => request<T>(path, { method: 'POST', body, params, silent: options?.silent }),
+	put: <T>(
+		path: string,
+		body?: unknown,
+		params?: Record<string, string>,
+		options?: { silent?: boolean },
+	) => request<T>(path, { method: 'PUT', body, params, silent: options?.silent }),
 	patch: <T>(
 		path: string,
 		body?: unknown,

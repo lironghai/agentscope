@@ -65,8 +65,9 @@ export function defaultRenderBody(pair: ToolCallWithResult, t: TFunction): React
 		text = result.output
 			.map((b) => {
 				if (b.type === 'text') return b.text;
-				const mainType = b.source.media_type.split('/')[0].toUpperCase();
-				const ext = (mime.extension(b.source.media_type) || 'bin').toLowerCase();
+				const mediaType = b.source.media_type || 'application/octet-stream';
+				const mainType = mediaType.split('/')[0].toUpperCase();
+				const ext = (mime.extension(mediaType) || 'bin').toLowerCase();
 				return `[${mainType}.${ext}]`;
 			})
 			.join('\n');
