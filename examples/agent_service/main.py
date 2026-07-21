@@ -29,6 +29,13 @@ from agentscope.model import DashScopeChatModel
 from agentscope.permission import PermissionContext, PermissionMode
 from agentscope.rag import PostgresVectorStore
 
+try:
+    from .shared_agents import SharedAgentPolicy
+except ImportError:  # pragma: no cover - supports ``uvicorn main:app``.
+    if __package__:
+        raise
+    from shared_agents import SharedAgentPolicy  # type: ignore[no-redef]
+
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -232,8 +239,11 @@ vector_store = PostgresVectorStore(
     ),
 )
 
+shared_agent_policy = SharedAgentPolicy()
+
 app = create_app(
     storage=storage,
+    resource_access_policy=shared_agent_policy,
     message_bus=RedisMessageBus(
         host=os.getenv("REDIS_HOST", "127.0.0.1"),
         port=_env_int("REDIS_PORT", 6379),

@@ -29,6 +29,7 @@ from ._model import (
     UserRecord,
     TeamMember,
     InviteConfig,
+    ShareConfig,
 )
 
 __all__ = [
@@ -60,4 +61,5 @@ __all__ = [
     "ScheduleData",
     "ScheduleRecord",
     "ScheduleSource",
+    "ShareConfig",
 ]

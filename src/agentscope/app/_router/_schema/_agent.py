@@ -5,7 +5,7 @@ import warnings
 from pydantic import BaseModel, Field
 
 from ....agent import ContextConfig, ReActConfig
-from ...storage import InviteConfig
+from ...storage import InviteConfig, ShareConfig
 from ..._service import AgentView
 
 
@@ -29,9 +29,13 @@ class CreateAgentRequest(BaseModel):
         default_factory=InviteConfig,
         description=(
             "Invite-pool settings for this agent. See "
-            ":class:`InviteConfig` — enforces the "
-            "``invitable ⇒ non-empty description`` invariant."
+            ":class:`InviteConfig` 鈥?enforces the "
+            "``invitable 鈬?non-empty description`` invariant."
         ),
+    )
+    share_config: ShareConfig = Field(
+        default_factory=ShareConfig,
+        description="Sharing settings for this agent.",
     )
 
 
@@ -67,6 +71,10 @@ class UpdateAgentRequest(BaseModel):
             "object to update; omit to leave both invitable-related "
             "fields unchanged."
         ),
+    )
+    share_config: ShareConfig | None = Field(
+        default=None,
+        description="New sharing settings. Omit to leave sharing unchanged.",
     )
 
 
@@ -107,7 +115,7 @@ class AgentSchemaResponse(BaseModel):
     )
 
 
-# The ``schema`` field name below is intentional — the wire contract for
+# The ``schema`` field name below is intentional 鈥?the wire contract for
 # ``GET /agent/schema/v2`` is ``{"schema": ...}`` so the response is
 # self-documenting. Pydantic v2's :meth:`BaseModel.schema` is a
 # deprecated legacy classmethod (superseded by ``model_json_schema``);
@@ -130,10 +138,5 @@ with warnings.catch_warnings():
         """
 
         schema: dict = Field(
-            description=(
-                "Full :class:`AgentData` JSON Schema. All user-editable "
-                "fields appear as top-level entries in ``properties`` — "
-                "the frontend derives its section grouping from this "
-                "single schema."
-            ),
+            description="The full JSON Schema of the AgentData model.",
         )

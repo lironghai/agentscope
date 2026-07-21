@@ -2,6 +2,7 @@
 """The unified agent class in AgentScope library."""
 import asyncio
 import inspect
+from datetime import datetime
 
 from asyncio import Queue
 from copy import deepcopy
@@ -423,12 +424,17 @@ class Agent:
                 ),
             )
 
+        def _compression_prompt() -> str:
+            return cfg.compression_prompt.format(
+                current_time=datetime.now().isoformat(timespec="seconds"),
+            )
+
         messages = (
             msgs_system
             + msgs_to_compress
             + instruction_msgs
             + [
-                UserMsg(name="user", content=cfg.compression_prompt),
+                UserMsg(name="user", content=_compression_prompt()),
             ]
         )
 
@@ -482,7 +488,7 @@ class Agent:
                         + [
                             UserMsg(
                                 name="user",
-                                content=cfg.compression_prompt,
+                                content=_compression_prompt(),
                             ),
                         ]
                     )
@@ -2045,21 +2051,30 @@ class Agent:
                 break
             block_index -= 1
 
-        # Adjust the block_index to avoid splitting tool call and result pairs
+        # Adjust the block_index to avoid splitting tool call and result pairs.
+        # Moving the boundary can bring another tool call into the compressed
+        # part while leaving its result reserved, so repeat until it is stable.
+        while True:
+            # Check if the reserved part has tool results that don't have the
+            # corresponding tool calls
+            remain_result_ids = {}
+            for i in range(
+                len(boundary_msg_content) - 1,
+                block_index,
+                -1,
+            ):
+                block = boundary_msg_content[i]
+                if isinstance(block, ToolResultBlock):
+                    remain_result_ids[block.id] = i
+                elif isinstance(block, ToolCallBlock):
+                    remain_result_ids.pop(block.id, None)
 
-        # Check if the reserved part has tool results that don't have the
-        # corresponding tool calls
-        remain_result_ids = {}
-        for i in range(len(boundary_msg_content) - 1, block_index, -1):
-            block = boundary_msg_content[i]
-            if isinstance(block, ToolResultBlock):
-                remain_result_ids[block.id] = i
-            elif isinstance(block, ToolCallBlock):
-                remain_result_ids.pop(block.id, None)
+            # All tool result blocks in the reserved part are paired.
+            if not remain_result_ids:
+                break
 
-        # Find the largest index of the remaining tool results, which doesn't
-        # have the corresponding tool calls in the reserved parts
-        if remain_result_ids:
+            # Move unmatched results into the compressed part and recheck,
+            # because this move can split another tool call/result pair.
             block_index = max(remain_result_ids.values())
 
         # Split the boundary msg content

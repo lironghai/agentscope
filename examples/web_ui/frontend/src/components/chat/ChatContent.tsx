@@ -1,10 +1,11 @@
 import type { ContentBlock, Msg, ToolCallBlock } from '@agentscope-ai/agentscope/message';
-import React from 'react';
-import { useRef, useEffect, useLayoutEffect } from 'react';
+import { ArrowDown } from 'lucide-react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { EmptyMessage } from './Empty';
 import { MessageBubble } from '@/components/chat/MessageBubble';
 import { TextInput } from '@/components/chat/TextInput.tsx';
+import { Button } from '@/components/ui/button.tsx';
 import type { ReplyPhase } from '@/hooks/useMessages';
 import { cn } from '@/lib/utils';
 
@@ -64,91 +65,111 @@ const ChatContentComponent: React.FC<ChatContentProps> = ({
 	const prevMsgCountRef = useRef<number>(0);
 	const wasNearBottomRef = useRef<boolean>(true);
 	const pendingSessionScrollRef = useRef<boolean>(true);
-	const waitingForSessionMessagesRef = useRef<boolean>(false);
+	const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+
+	const updateScrollState = useCallback(() => {
+		const scrollArea = scrollAreaRef.current;
+		if (!scrollArea) return;
+
+		const { scrollTop, scrollHeight, clientHeight } = scrollArea;
+		const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+
+		wasNearBottomRef.current = distanceFromBottom <= 50;
+		setShowScrollToBottom(distanceFromBottom > 100);
+	}, []);
+
+	const scrollToBottom = useCallback((behavior: ScrollBehavior) => {
+		const scrollArea = scrollAreaRef.current;
+		if (!scrollArea) return;
+		scrollArea.scrollTo({
+			top: scrollArea.scrollHeight,
+			behavior,
+		});
+		setShowScrollToBottom(false);
+	}, []);
 
 	// Auto-scroll to bottom on session load, and after that only if the
 	// user is already near the bottom.
 	useLayoutEffect(() => {
 		const currentCount = msgs.length;
+
 		if (currentSessionIdRef.current !== sessionId) {
 			currentSessionIdRef.current = sessionId;
 			pendingSessionScrollRef.current = true;
-			waitingForSessionMessagesRef.current = currentCount > 0;
 			prevMsgCountRef.current = 0;
 			wasNearBottomRef.current = true;
+			setShowScrollToBottom(false);
 		}
 
 		const prevCount = prevMsgCountRef.current;
-		if (pendingSessionScrollRef.current && waitingForSessionMessagesRef.current) {
-			if (currentCount === 0) {
-				waitingForSessionMessagesRef.current = false;
-				prevMsgCountRef.current = 0;
-			}
+		const shouldScrollForSession = pendingSessionScrollRef.current && currentCount > 0;
+		const isActive = phase !== 'idle';
+		const hasRelevantUpdate =
+			(currentCount > prevCount && prevCount > 0) || (isActive && prevCount > 0);
+		const shouldScroll =
+			shouldScrollForSession || (hasRelevantUpdate && wasNearBottomRef.current);
+
+		if (shouldScroll) {
+			scrollToBottom(shouldScrollForSession ? 'auto' : 'smooth');
+			pendingSessionScrollRef.current = false;
+			prevMsgCountRef.current = currentCount;
 			return;
 		}
 
-		const shouldScrollForSession = pendingSessionScrollRef.current && currentCount > 0;
-
-		const isActive = phase !== 'idle';
-		const shouldCheck =
-			shouldScrollForSession ||
-			(currentCount > prevCount && prevCount > 0) ||
-			(isActive && prevCount > 0);
-
-		if (shouldCheck && scrollAreaRef.current) {
-			const { scrollHeight } = scrollAreaRef.current;
-
-			// Check if user was near bottom before content changed
-			const isNearBottom = wasNearBottomRef.current;
-
-			if (shouldScrollForSession || isNearBottom) {
-				scrollAreaRef.current.scrollTo({
-					top: scrollHeight,
-					behavior: shouldScrollForSession ? 'auto' : 'smooth',
-				});
-				pendingSessionScrollRef.current = false;
-			}
-		}
-
+		updateScrollState();
 		prevMsgCountRef.current = currentCount;
-	}, [msgs, phase, sessionId]);
+	}, [msgs, phase, sessionId, scrollToBottom, updateScrollState]);
 
 	// Track if user is near bottom whenever they scroll
 	useEffect(() => {
 		const scrollArea = scrollAreaRef.current;
 		if (!scrollArea) return;
 
-		const handleScroll = () => {
-			const { scrollTop, scrollHeight, clientHeight } = scrollArea;
-			wasNearBottomRef.current = scrollTop + clientHeight >= scrollHeight - 50;
-		};
-
-		scrollArea.addEventListener('scroll', handleScroll);
-		return () => scrollArea.removeEventListener('scroll', handleScroll);
-	}, []);
+		scrollArea.addEventListener('scroll', updateScrollState);
+		return () => scrollArea.removeEventListener('scroll', updateScrollState);
+	}, [updateScrollState]);
 
 	return (
 		<div className={cn('flex flex-col h-full w-full items-center p-2 gap-4', className)}>
-			<div
-				ref={scrollAreaRef}
-				className="flex-1 w-full max-w-full overflow-auto no-scrollbar overflow-x-hidden"
-			>
-				<div className="flex flex-col gap-4 size-full max-w-full">
-					{msgs.length > 0 ? (
-						msgs.map((message) => (
-							<MessageBubble
-								key={message.id}
-								message={message}
-								onUserConfirm={onUserConfirm}
-								onOpenDiagnostics={
-									message.role === 'assistant' ? onOpenDiagnostics : undefined
-								}
-							/>
-						))
-					) : (
-						<EmptyMessage />
-					)}
+			<div className="relative flex-1 min-h-0 w-full max-w-full">
+				<div
+					ref={scrollAreaRef}
+					className="size-full overflow-auto no-scrollbar overflow-x-hidden"
+				>
+					<div className="flex flex-col gap-4 size-full max-w-full">
+						{msgs.length > 0 ? (
+							msgs.map((message) => (
+								<MessageBubble
+									key={message.id}
+									message={message}
+									onUserConfirm={onUserConfirm}
+									onOpenDiagnostics={
+										message.role === 'assistant' ? onOpenDiagnostics : undefined
+									}
+								/>
+							))
+						) : (
+							<EmptyMessage />
+						)}
+					</div>
 				</div>
+				<Button
+					type="button"
+					variant="outline"
+					size="icon"
+					aria-label="Scroll to bottom"
+					aria-hidden={!showScrollToBottom}
+					tabIndex={showScrollToBottom ? 0 : -1}
+					className={cn(
+						'absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full shadow-md transition-all duration-200',
+						showScrollToBottom
+							? 'translate-y-0 opacity-100'
+							: 'pointer-events-none translate-y-2 opacity-0',
+					)}
+					onClick={() => scrollToBottom('smooth')}
+				>
+					<ArrowDown />
+				</Button>
 			</div>
 			{footerSlot ? <div className="w-full max-w-full shrink-0">{footerSlot}</div> : null}
 			<TextInput

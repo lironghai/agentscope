@@ -62,6 +62,19 @@ class InviteConfig(BaseModel):
         return self
 
 
+class ShareConfig(BaseModel):
+    """User-editable sharing settings for :class:`AgentData`."""
+
+    shared: bool = Field(
+        default=False,
+        description=(
+            "Whether this agent is visible to other users as a read-only "
+            "shared agent."
+        ),
+        title="Shared",
+    )
+
+
 class AgentData(BaseModel):
     """The agent data model."""
 
@@ -106,6 +119,12 @@ class AgentData(BaseModel):
         default_factory=InviteConfig,
         description="The invite config for the agent.",
         title="Invite Config",
+    )
+
+    share_config: ShareConfig = Field(
+        default_factory=ShareConfig,
+        description="The sharing config for the agent.",
+        title="Share Config",
     )
 
 

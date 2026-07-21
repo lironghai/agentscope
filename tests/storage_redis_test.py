@@ -19,7 +19,7 @@ from agentscope.app.storage import (
     TeamRecord,
 )
 from agentscope.credential import OllamaCredential
-from agentscope.app.storage import AgentData
+from agentscope.app.storage import AgentData, ShareConfig
 from agentscope.agent import ContextConfig, ReActConfig
 from agentscope.message import UserMsg, AssistantMsg, TextBlock
 from agentscope.state import AgentState
@@ -35,7 +35,7 @@ def make_storage() -> RedisStorage:
     return storage
 
 
-def make_agent_record(user_id: str) -> AgentRecord:
+def make_agent_record(user_id: str, *, shared: bool = False) -> AgentRecord:
     """Create a test AgentRecord with all-default sub-configs."""
     return AgentRecord(
         user_id=user_id,
@@ -45,6 +45,7 @@ def make_agent_record(user_id: str) -> AgentRecord:
             system_prompt="You are a helpful assistant.",
             context_config=ContextConfig(),
             react_config=ReActConfig(),
+            share_config=ShareConfig(shared=shared),
         ),
     )
 
@@ -336,10 +337,11 @@ class TestMessage(IsolatedAsyncioTestCase):
         """Upserting a new message appends it to the session list."""
         msg = UserMsg(name="alice", content="hello")
         await self.storage.upsert_message(self.user_id, self.session_id, msg)
-        messages = await self.storage.list_messages(
+        messages, has_more = await self.storage.list_messages(
             self.user_id,
             self.session_id,
         )
+        self.assertFalse(has_more)
         self.assertListEqual(
             [m.model_dump() for m in messages],
             [msg.model_dump()],
@@ -373,10 +375,11 @@ class TestMessage(IsolatedAsyncioTestCase):
             updated,
         )
 
-        messages = await self.storage.list_messages(
+        messages, has_more = await self.storage.list_messages(
             self.user_id,
             self.session_id,
         )
+        self.assertFalse(has_more)
         self.assertListEqual(
             [m.model_dump() for m in messages],
             [updated.model_dump()],
@@ -413,10 +416,11 @@ class TestMessage(IsolatedAsyncioTestCase):
         msg2 = UserMsg(name="alice", content="second")
         await self.storage.upsert_message(self.user_id, self.session_id, msg1)
         await self.storage.upsert_message(self.user_id, self.session_id, msg2)
-        messages = await self.storage.list_messages(
+        messages, has_more = await self.storage.list_messages(
             self.user_id,
             self.session_id,
         )
+        self.assertFalse(has_more)
         self.assertListEqual(
             [m.model_dump() for m in messages],
             [msg1.model_dump(), msg2.model_dump()],
@@ -449,14 +453,15 @@ class TestMessage(IsolatedAsyncioTestCase):
     async def test_list_messages_empty_session(self) -> None:
         """list_messages returns an empty list for a session with no
         messages."""
-        messages = await self.storage.list_messages(
+        messages, has_more = await self.storage.list_messages(
             self.user_id,
             self.session_id,
         )
+        self.assertFalse(has_more)
         self.assertListEqual(messages, [])
 
-    async def test_list_messages_pagination(self) -> None:
-        """list_messages respects offset and limit parameters."""
+    async def test_list_messages_latest_page(self) -> None:
+        """list_messages without cursor returns the most recent messages."""
         msgs = [UserMsg(name="alice", content=f"msg-{i}") for i in range(5)]
         for m in msgs:
             await self.storage.upsert_message(
@@ -465,17 +470,99 @@ class TestMessage(IsolatedAsyncioTestCase):
                 m,
             )
 
-        # Fetch the middle slice: offset=1, limit=3 → msgs[1], msgs[2], msgs[3]
-        page = await self.storage.list_messages(
+        # Default: latest page with limit=3 → last 3 messages
+        page, has_more = await self.storage.list_messages(
             self.user_id,
             self.session_id,
-            offset=1,
             limit=3,
         )
+        self.assertTrue(has_more)
         self.assertListEqual(
             [m.model_dump() for m in page],
-            [m.model_dump() for m in msgs[1:4]],
+            [m.model_dump() for m in msgs[2:5]],
         )
+
+    async def test_list_messages_cursor_pagination(self) -> None:
+        """list_messages with before cursor returns older messages."""
+        msgs = [UserMsg(name="alice", content=f"msg-{i}") for i in range(5)]
+        for m in msgs:
+            await self.storage.upsert_message(
+                self.user_id,
+                self.session_id,
+                m,
+            )
+
+        # Use msgs[3].id as cursor → should get msgs[0], msgs[1], msgs[2]
+        page, has_more = await self.storage.list_messages(
+            self.user_id,
+            self.session_id,
+            limit=3,
+            before=msgs[3].id,
+        )
+        self.assertFalse(has_more)
+        self.assertListEqual(
+            [m.model_dump() for m in page],
+            [m.model_dump() for m in msgs[0:3]],
+        )
+
+    async def test_list_messages_has_more_flag(self) -> None:
+        """has_more is True when older messages exist beyond the page."""
+        msgs = [UserMsg(name="alice", content=f"msg-{i}") for i in range(10)]
+        for m in msgs:
+            await self.storage.upsert_message(
+                self.user_id,
+                self.session_id,
+                m,
+            )
+
+        # Latest 5 of 10 → has_more should be True
+        _, has_more = await self.storage.list_messages(
+            self.user_id,
+            self.session_id,
+            limit=5,
+        )
+        self.assertTrue(has_more)
+
+        # Cursor at msgs[5], limit=5 → msgs[0..4], has_more should be False
+        _, has_more = await self.storage.list_messages(
+            self.user_id,
+            self.session_id,
+            limit=5,
+            before=msgs[5].id,
+        )
+        self.assertFalse(has_more)
+
+    async def test_list_messages_invalid_cursor(self) -> None:
+        """list_messages with nonexistent cursor returns empty result."""
+        msg = UserMsg(name="alice", content="hello")
+        await self.storage.upsert_message(self.user_id, self.session_id, msg)
+
+        page, has_more = await self.storage.list_messages(
+            self.user_id,
+            self.session_id,
+            before="nonexistent-id",
+        )
+        self.assertFalse(has_more)
+        self.assertListEqual(page, [])
+
+    async def test_find_message_index_across_chunks(self) -> None:
+        """_find_message_index locates messages beyond the first chunk."""
+        msgs = [UserMsg(name="alice", content=f"msg-{i}") for i in range(7)]
+        for m in msgs:
+            await self.storage.upsert_message(
+                self.user_id,
+                self.session_id,
+                m,
+            )
+        key = self.storage._message_key(self.user_id, self.session_id)
+
+        # chunk_size=2 forces the scan to walk several chunks.
+        for i, m in enumerate(msgs):
+            idx = await self.storage._find_message_index(key, m.id, 2)
+            self.assertEqual(idx, i)
+
+        idx = await self.storage._find_message_index(key, "nonexistent", 2)
+        self.assertIsNone(idx)
 
     async def test_list_messages_order_preserved(self) -> None:
         """Messages are returned in the insertion order (chronological)."""
@@ -489,10 +576,11 @@ class TestMessage(IsolatedAsyncioTestCase):
                 self.session_id,
                 m,
             )
-        messages = await self.storage.list_messages(
+        messages, has_more = await self.storage.list_messages(
             self.user_id,
             self.session_id,
         )
+        self.assertFalse(has_more)
         self.assertListEqual(
             [m.model_dump() for m in messages],
             [m.model_dump() for m in msgs],
@@ -505,11 +593,27 @@ class TestMessage(IsolatedAsyncioTestCase):
             "session-A",
             UserMsg(name="alice", content="in A"),
         )
-        messages = await self.storage.list_messages(
+        messages, has_more = await self.storage.list_messages(
             self.user_id,
             "session-B",
         )
+        self.assertFalse(has_more)
         self.assertListEqual(messages, [])
+
+    async def test_list_messages_offset_kwarg_warns(self) -> None:
+        """Passing deprecated offset via kwargs emits DeprecationWarning."""
+        msg = UserMsg(name="alice", content="hello")
+        await self.storage.upsert_message(self.user_id, self.session_id, msg)
+
+        with self.assertWarns(DeprecationWarning):
+            messages, has_more = await self.storage.list_messages(
+                self.user_id,
+                self.session_id,
+                offset=0,
+            )
+        # Should still return results (offset is ignored, latest page).
+        self.assertFalse(has_more)
+        self.assertEqual(len(messages), 1)
 
 
 def make_schedule_record(user_id: str, agent_id: str) -> ScheduleRecord:
@@ -735,6 +839,32 @@ class TestAgentSource(IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(loaded_worker)
         self.assertEqual(loaded_worker.source, "team")
+
+    async def test_shared_agent_index_tracks_shared_agents(self) -> None:
+        """Shared agent index should follow the agent's share toggle."""
+        private_agent = make_agent_record(self.user_id)
+        shared_agent = make_agent_record(self.user_id, shared=True)
+
+        await self.storage.upsert_agent(self.user_id, private_agent)
+        await self.storage.upsert_agent(self.user_id, shared_agent)
+
+        visible = await self.storage.list_shared_agents("other-user")
+        visible_ids = {record.id for record in visible}
+        self.assertIn(shared_agent.id, visible_ids)
+        self.assertNotIn(private_agent.id, visible_ids)
+
+        owner_visible = await self.storage.list_shared_agents(self.user_id)
+        self.assertNotIn(shared_agent.id, {record.id for record in owner_visible})
+
+        shared_agent.data.share_config.shared = False
+        await self.storage.upsert_agent(self.user_id, shared_agent)
+        visible = await self.storage.list_shared_agents("other-user")
+        visible_ids = {record.id for record in visible}
+        self.assertNotIn(shared_agent.id, visible_ids)
+
+        await self.storage.delete_agent(self.user_id, shared_agent.id)
+        visible = await self.storage.list_shared_agents("other-user")
+        self.assertNotIn(shared_agent.id, {record.id for record in visible})
 
     async def test_legacy_record_without_source_deserializes(self) -> None:
         """JSON written before the ``source`` field was added still loads

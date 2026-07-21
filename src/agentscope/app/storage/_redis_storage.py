@@ -2,6 +2,8 @@
 # pylint: disable=too-many-public-methods
 """The Redis storage implementation."""
 
+import json
+import warnings
 from datetime import datetime, timedelta
 from typing import Any, TYPE_CHECKING, Self
 
@@ -65,6 +67,7 @@ class RedisStorage(StorageBase):
         # Index keys (Redis Sets — store all IDs for a given scope)
         credential_index: str = "agentscope:user:{user_id}:credentials"
         agent_index: str = "agentscope:user:{user_id}:agents"
+        shared_agent_index: str = "agentscope:shared_agents"
         session_index: str = (
             "agentscope:user:{user_id}:agent:{agent_id}:sessions"
         )
@@ -441,6 +444,7 @@ class RedisStorage(StorageBase):
         index_key = self._key(self.key_config.agent_index, user_id=user_id)
         await self._set_with_ttl(key, agent_record.model_dump_json())
         await self._client.sadd(index_key, agent_record.id)
+        await self._sync_shared_agent_index(user_id, agent_record)
         return agent_record.id
 
     async def list_agents(self, user_id: str) -> list[AgentRecord]:
@@ -477,6 +481,33 @@ class RedisStorage(StorageBase):
                 record = AgentRecord.model_validate_json(raw)
                 if record.source == "user":
                     records.append(record)
+        return records
+
+    async def list_shared_agents(self, viewer_id: str) -> list[AgentRecord]:
+        """Return shared user-created agents visible to ``viewer_id``."""
+        members = await self._client.smembers(self.key_config.shared_agent_index)
+        records: list[AgentRecord] = []
+        for member in members:
+            try:
+                payload = json.loads(member)
+            except json.JSONDecodeError:
+                continue
+            owner_id = payload.get("user_id")
+            agent_id = payload.get("agent_id")
+            if not owner_id or not agent_id or owner_id == viewer_id:
+                continue
+            raw = await self._client.get(
+                self._key(
+                    self.key_config.agent,
+                    user_id=owner_id,
+                    agent_id=agent_id,
+                ),
+            )
+            if not raw:
+                continue
+            record = AgentRecord.model_validate_json(raw)
+            if record.source == "user" and record.data.share_config.shared:
+                records.append(record)
         return records
 
     async def get_agent(
@@ -571,7 +602,23 @@ class RedisStorage(StorageBase):
         index_key = self._key(self.key_config.agent_index, user_id=user_id)
         deleted = await self._client.delete(key)
         await self._client.srem(index_key, agent_id)
+        await self._client.srem(
+            self.key_config.shared_agent_index,
+            json.dumps({"user_id": user_id, "agent_id": agent_id}),
+        )
         return deleted > 0
+
+    async def _sync_shared_agent_index(
+        self,
+        user_id: str,
+        agent_record: AgentRecord,
+    ) -> None:
+        """Keep the global shared-agent index aligned with storage."""
+        member = json.dumps({"user_id": user_id, "agent_id": agent_record.id})
+        if agent_record.source == "user" and agent_record.data.share_config.shared:
+            await self._client.sadd(self.key_config.shared_agent_index, member)
+            return
+        await self._client.srem(self.key_config.shared_agent_index, member)
 
     async def upsert_session(
         self,
@@ -1005,17 +1052,95 @@ class RedisStorage(StorageBase):
                     return msg
         return None
 
+    async def _find_message_index(
+        self,
+        key: str,
+        message_id: str,
+        chunk_size: int = 100,
+    ) -> int | None:
+        """Return the index of a message in the Redis list, or ``None``.
+
+        Scans backwards from the tail (most recent) in chunks, since
+        ``before`` cursors are typically near the end.
+
+        Args:
+            key (`str`): The Redis list key.
+            message_id (`str`): The message ID to locate.
+            chunk_size (`int`, optional): Number of entries fetched per
+                round trip. Defaults to 100.
+
+        Returns:
+            `int | None`: Zero-based index, or ``None`` if not found.
+        """
+        end = await self._client.llen(key) - 1
+        while end >= 0:
+            start = max(end - chunk_size + 1, 0)
+            raw_list = await self._client.lrange(key, start, end)
+            for offset, raw in enumerate(reversed(raw_list)):
+                if Msg.model_validate_json(raw).id == message_id:
+                    return end - offset
+            end = start - 1
+        return None
+
     async def list_messages(
         self,
         user_id: str,
         session_id: str,
-        offset: int = 0,
         limit: int = 50,
-    ) -> list[Msg]:
-        """Return messages for a session with pagination."""
+        before: str | None = None,
+        **kwargs: Any,
+    ) -> tuple[list[Msg], bool]:
+        """Return the most recent messages with cursor-based pagination.
+
+        Messages are returned in chronological order.
+
+        Args:
+            user_id (`str`): The owner user id.
+            session_id (`str`): The session id.
+            limit (`int`, optional): Maximum number of messages to
+                return. Defaults to 50.
+            before (`str | None`, optional): A message ID used as the
+                cursor. When provided, returns messages created before
+                this message. Omit to get the latest page.
+            **kwargs: Reserved for backward compatibility. Passing
+                ``offset`` will emit a ``DeprecationWarning`` and be
+                ignored.
+
+        Returns:
+            `tuple[list[Msg], bool]`: A tuple of (messages in
+            chronological order, has_more). ``has_more`` is ``True``
+            when older messages exist before the returned page.
+        """
+        if "offset" in kwargs:
+            warnings.warn(
+                "The 'offset' parameter is deprecated and will be "
+                "removed in a future version. Use 'before' for "
+                "cursor-based pagination instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         key = self._message_key(user_id, session_id)
-        raw_list = await self._client.lrange(key, offset, offset + limit - 1)
-        return [Msg.model_validate_json(raw) for raw in raw_list]
+        total = await self._client.llen(key)
+
+        if total == 0:
+            return [], False
+
+        if before is None:
+            end = total - 1
+        else:
+            idx = await self._find_message_index(key, before)
+            if idx is None:
+                return [], False
+            end = idx - 1
+
+        start = max(end - limit + 1, 0)
+        if end < 0:
+            return [], False
+
+        raw_list = await self._client.lrange(key, start, end)
+        has_more = start > 0
+        return [Msg.model_validate_json(raw) for raw in raw_list], has_more
 
     # ------------------------------------------------------------------
     # Execution trace persistence
