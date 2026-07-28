@@ -1,6 +1,7 @@
 import { client } from './client';
 import type {
 	AgentListResponse,
+	AgentToolCatalogItem,
 	AgentToolsConfigResponse,
 	AgentView,
 	AgentSchemaV2Response,
@@ -23,6 +24,9 @@ export const agentApi = {
 		client.get<AgentView>(`/agent/${agentId}`, undefined, options),
 
 	getSchema: () => client.get<AgentSchemaV2Response>('/agent/schema/v2'),
+
+	listToolCatalog: (options?: { signal?: AbortSignal; silent?: boolean }) =>
+		client.get<AgentToolCatalogItem[]>('/agent/tools/catalog', undefined, options),
 
 	create: (body: CreateAgentRequest, options?: { silent?: boolean }) =>
 		client.post<CreateAgentResponse>('/agent/', body, undefined, {

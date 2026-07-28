@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 
 import type { AgentSchemaV2Response, JSONSchema, JSONSchemaProperty } from '@/api';
+import { AgentToolConfigEditor } from '@/components/form/AgentToolConfigEditor';
 import { SchemaForm, type SchemaFormValue } from '@/components/form/SchemaForm';
 import {
 	FieldDescription,
@@ -129,22 +130,29 @@ export function AgentFormFields({ schema, values, onChange }: Props) {
 						<FieldSet>
 							<FieldLegend>{legend}</FieldLegend>
 							{description && <FieldDescription>{description}</FieldDescription>}
-							<SchemaForm
-								schema={sectionSchema}
-								values={values[sectionKey]}
-								onChange={(k, v) => onChange(sectionKey, k, v)}
-								idPrefix={`agent-form-${sectionI18n}`}
-								labelFor={(k, prop) =>
-									t(`agent-form.${sectionI18n}.${toKebab(k)}.label`, {
-										defaultValue: prop.title ?? k.replace(/_/g, ' '),
-									})
-								}
-								placeholderFor={(k, prop) =>
-									t(`agent-form.${sectionI18n}.${toKebab(k)}.placeholder`, {
-										defaultValue: prop.description ?? '',
-									}) || undefined
-								}
-							/>
+							{sectionKey === 'tool_config' ? (
+								<AgentToolConfigEditor
+									values={values.tool_config}
+									onChange={(k, v) => onChange('tool_config', k, v)}
+								/>
+							) : (
+								<SchemaForm
+									schema={sectionSchema}
+									values={values[sectionKey]}
+									onChange={(k, v) => onChange(sectionKey, k, v)}
+									idPrefix={`agent-form-${sectionI18n}`}
+									labelFor={(k, prop) =>
+										t(`agent-form.${sectionI18n}.${toKebab(k)}.label`, {
+											defaultValue: prop.title ?? k.replace(/_/g, ' '),
+										})
+									}
+									placeholderFor={(k, prop) =>
+										t(`agent-form.${sectionI18n}.${toKebab(k)}.placeholder`, {
+											defaultValue: prop.description ?? '',
+										}) || undefined
+									}
+								/>
+							)}
 						</FieldSet>
 					</div>
 				);

@@ -54,6 +54,7 @@ from agentscope.agent import ContextConfig, ReActConfig
 from agentscope.app._router._agent_tools import (
     UpdateAgentToolsRequest,
     get_agent_tools_config,
+    list_agent_tool_catalog,
     update_agent_tools_config,
 )
 from agentscope.app._service import AgentView, AgentWorkspaceService
@@ -159,6 +160,42 @@ def _agent_record(**updates) -> AgentRecord:
         **updates,
     )
     return AgentRecord(id="agent-1", user_id="owner-1", data=data)
+
+
+def test_agent_tool_catalog_lists_configurable_builtin_tools() -> None:
+    """The Agent form should discover configurable built-in tool names."""
+
+    catalog = list_agent_tool_catalog()
+    by_name = {item.name: item for item in catalog}
+
+    assert {
+        "Bash",
+        "PowerShell",
+        "Edit",
+        "Glob",
+        "Grep",
+        "Read",
+        "Write",
+        "TaskCreate",
+        "TaskList",
+        "TaskGet",
+        "TaskUpdate",
+        "ToolStop",
+        "ScheduleCreate",
+        "ScheduleList",
+        "ScheduleView",
+        "ScheduleDelete",
+        "TeamCreate",
+        "AgentCreate",
+        "AgentInvite",
+        "TeamSay",
+        "TeamDelete",
+    }.issubset(by_name)
+    assert by_name["Bash"].source == "Workspace"
+    assert by_name["TaskCreate"].source == "Planning"
+    assert by_name["TeamCreate"].source == "Team"
+    assert all(item.description for item in catalog)
+    assert "skillhub" not in {item.source.lower() for item in catalog}
 
 
 def test_agent_workspace_projects_tool_config_and_mcp_bindings(
@@ -285,6 +322,27 @@ def test_agent_tool_config_filters_tools_with_deny_precedence() -> None:
 
     filtered = _filter_tools_for_agent_config(
         [_Tool("Read"), _Tool("Bash"), _Tool("Write")],
+        agent,
+    )
+
+    assert [tool.name for tool in filtered] == ["Read"]
+
+
+def test_agent_tool_config_shell_alias_filters_powershell() -> None:
+    """The legacy shell alias should also hide the Windows shell tool."""
+
+    class _Tool:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    agent = _agent_record(
+        tool_config=AgentToolConfig(
+            deny=["shell"],
+        ),
+    )
+
+    filtered = _filter_tools_for_agent_config(
+        [_Tool("PowerShell"), _Tool("Read")],
         agent,
     )
 

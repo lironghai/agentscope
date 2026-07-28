@@ -14,6 +14,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useTranslation } from '@/i18n/useI18n';
+import { cn } from '@/lib/utils';
 
 interface AddSkillDialogProps {
 	children: ReactNode;
@@ -71,13 +72,34 @@ export function AddSkillDialog({ children, onAdd, onUpload }: AddSkillDialogProp
 						}}
 					/>
 					<Label htmlFor="skill-file">{t('dialog-skill-add.fileLabel')}</Label>
-					<Input
-						id="skill-file"
-						type="file"
-						accept=".zip,application/zip,application/x-zip-compressed"
-						disabled={skillPath.trim().length > 0}
-						onChange={(e) => setSkillFile(e.target.files?.[0] ?? null)}
-					/>
+					<div className="flex min-h-10 items-center gap-2 rounded-lg border border-input bg-background px-2 py-1.5">
+						<Input
+							id="skill-file"
+							type="file"
+							accept=".zip,application/zip,application/x-zip-compressed"
+							disabled={skillPath.trim().length > 0}
+							className="sr-only"
+							onChange={(e) => setSkillFile(e.target.files?.[0] ?? null)}
+						/>
+						<Label
+							htmlFor="skill-file"
+							aria-disabled={skillPath.trim().length > 0}
+							className={cn(
+								'inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-muted px-3 text-sm font-medium transition-colors hover:bg-muted/80',
+								skillPath.trim().length > 0 &&
+									'pointer-events-none cursor-not-allowed opacity-50',
+							)}
+						>
+							<Upload className="size-3.5" />
+							{t('dialog-skill-add.fileLabel')}
+						</Label>
+						<span className="text-muted-foreground min-w-0 flex-1 truncate text-sm">
+							{skillFile?.name ??
+								t('dialog-skill-add.noFileSelected', {
+									defaultValue: 'No file selected',
+								})}
+						</span>
+					</div>
 					<p className="text-muted-foreground text-xs">
 						{t('dialog-skill-add.fileDescription')}
 					</p>

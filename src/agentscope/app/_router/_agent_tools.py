@@ -53,6 +53,14 @@ class AgentToolsConfigResponse(BaseModel):
     )
 
 
+class AgentToolCatalogItem(BaseModel):
+    """One configurable built-in Agent tool entry."""
+
+    name: str = Field(description="Runtime tool name used by allow/deny.")
+    description: str = Field(description="Short human-readable purpose.")
+    source: str = Field(description="Runtime source that contributes the tool.")
+
+
 class UpdateAgentToolsRequest(BaseModel):
     """Request body for replacing Agent tools config slices."""
 
@@ -64,6 +72,125 @@ class UpdateAgentToolsRequest(BaseModel):
         default=None,
         description="Replacement MCP binding list.",
     )
+
+
+_AGENT_TOOL_CATALOG: tuple[AgentToolCatalogItem, ...] = (
+    AgentToolCatalogItem(
+        name="Bash",
+        description="Execute shell commands in the Agent workspace.",
+        source="Workspace",
+    ),
+    AgentToolCatalogItem(
+        name="PowerShell",
+        description="Execute PowerShell commands in the Agent workspace on Windows.",
+        source="Workspace",
+    ),
+    AgentToolCatalogItem(
+        name="Edit",
+        description="Apply targeted edits to files in the Agent workspace.",
+        source="Workspace",
+    ),
+    AgentToolCatalogItem(
+        name="Glob",
+        description="Find files by glob pattern in the Agent workspace.",
+        source="Workspace",
+    ),
+    AgentToolCatalogItem(
+        name="Grep",
+        description="Search file contents in the Agent workspace.",
+        source="Workspace",
+    ),
+    AgentToolCatalogItem(
+        name="Read",
+        description="Read file contents from the Agent workspace.",
+        source="Workspace",
+    ),
+    AgentToolCatalogItem(
+        name="Write",
+        description="Create or overwrite files in the Agent workspace.",
+        source="Workspace",
+    ),
+    AgentToolCatalogItem(
+        name="TaskCreate",
+        description="Create a structured planning task for the Agent run.",
+        source="Planning",
+    ),
+    AgentToolCatalogItem(
+        name="TaskList",
+        description="List structured planning tasks available to the Agent.",
+        source="Planning",
+    ),
+    AgentToolCatalogItem(
+        name="TaskGet",
+        description="Read details for a structured planning task.",
+        source="Planning",
+    ),
+    AgentToolCatalogItem(
+        name="TaskUpdate",
+        description="Update status or details for a structured planning task.",
+        source="Planning",
+    ),
+    AgentToolCatalogItem(
+        name="ToolStop",
+        description="Stop a running background tool task for the current session.",
+        source="Runtime",
+    ),
+    AgentToolCatalogItem(
+        name="ScheduleCreate",
+        description="Create a scheduled Agent run.",
+        source="Schedule",
+    ),
+    AgentToolCatalogItem(
+        name="ScheduleList",
+        description="List schedules owned by the current Agent.",
+        source="Schedule",
+    ),
+    AgentToolCatalogItem(
+        name="ScheduleView",
+        description="Inspect one schedule owned by the current Agent.",
+        source="Schedule",
+    ),
+    AgentToolCatalogItem(
+        name="ScheduleDelete",
+        description="Delete a schedule owned by the current Agent.",
+        source="Schedule",
+    ),
+    AgentToolCatalogItem(
+        name="TeamCreate",
+        description="Create a multi-agent team led by the current session.",
+        source="Team",
+    ),
+    AgentToolCatalogItem(
+        name="AgentCreate",
+        description="Spawn a worker Agent inside the current team.",
+        source="Team",
+    ),
+    AgentToolCatalogItem(
+        name="AgentInvite",
+        description="Invite an existing Agent into the current team.",
+        source="Team",
+    ),
+    AgentToolCatalogItem(
+        name="TeamSay",
+        description="Send a message to a team member or the team leader.",
+        source="Team",
+    ),
+    AgentToolCatalogItem(
+        name="TeamDelete",
+        description="Disband the current team.",
+        source="Team",
+    ),
+)
+
+
+@agent_tools_router.get(
+    "/tools/catalog",
+    response_model=list[AgentToolCatalogItem],
+    summary="List configurable built-in Agent tools",
+)
+def list_agent_tool_catalog() -> list[AgentToolCatalogItem]:
+    """Return built-in tool names that can be controlled by allow/deny."""
+    return [item.model_copy() for item in _AGENT_TOOL_CATALOG]
 
 
 @agent_tools_router.get(

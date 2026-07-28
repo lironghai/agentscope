@@ -85,16 +85,34 @@ class AgentBindingResolver:
         """Materialise enabled Agent bindings into ``workspace``."""
         result = AgentBindingMaterializationResult()
         existing_skill_names = await self._existing_skill_names(workspace)
-        existing_mcp_names = await self._existing_mcp_names(workspace)
+        existing_mcps = await self._existing_mcps(workspace)
+        existing_mcp_names = {mcp.name for mcp in existing_mcps}
+        mcp_names_to_refresh = self._skillhub_mcp_names_missing_auth(
+            agent_record,
+            existing_mcps,
+            skillhub_token,
+        )
         resolved = await self._resolve_agent_bindings(
             user_id=user_id,
             agent_record=agent_record,
             skillhub_token=skillhub_token,
             existing_skill_names=existing_skill_names,
-            existing_mcp_names=existing_mcp_names,
+            existing_mcp_names=existing_mcp_names - mcp_names_to_refresh,
         )
         if resolved.errors:
             result.errors.extend(resolved.errors)
+            return result
+        for name in sorted(mcp_names_to_refresh):
+            try:
+                await workspace.remove_mcp(name)
+            except Exception as exc:  # pylint: disable=broad-except
+                message = (
+                    f"Refreshing MCP binding {name} failed for agent "
+                    f"{agent_record.id}: {exc}"
+                )
+                logger.warning(message)
+                result.errors.append(message)
+        if result.errors:
             return result
         await self._apply_resolved_bindings(
             workspace=workspace,
@@ -123,9 +141,17 @@ class AgentBindingResolver:
             before_agent_record,
             after_agent_record,
         )
-        existing_mcp_names = await self._existing_mcp_names(workspace)
+        existing_mcps = await self._existing_mcps(workspace)
+        existing_mcp_names = {mcp.name for mcp in existing_mcps}
+        refresh_mcp_names = self._skillhub_mcp_names_missing_auth(
+            after_agent_record,
+            existing_mcps,
+            skillhub_token,
+        )
         mcp_names_to_remove = (
-            (before_mcp_names - after_mcp_names) | changed_mcp_names
+            (before_mcp_names - after_mcp_names)
+            | changed_mcp_names
+            | refresh_mcp_names
         ) & existing_mcp_names
         resolved = await self._resolve_agent_bindings(
             user_id=user_id,
@@ -229,7 +255,15 @@ class AgentBindingResolver:
             if mcp_name in existing_mcp_names:
                 continue
             try:
-                resolved.mcps.append((binding, self._resolve_mcp_binding(binding)))
+                resolved.mcps.append(
+                    (
+                        binding,
+                        self._resolve_mcp_binding(
+                            binding,
+                            skillhub_token,
+                        ),
+                    ),
+                )
             except Exception as exc:  # pylint: disable=broad-except
                 message = (
                     f"MCP binding {binding.name or binding.skillhub_server_id} "
@@ -379,7 +413,11 @@ class AgentBindingResolver:
             raise ValueError("downloaded package does not contain SKILL.md")
         return skill_dir
 
-    def _resolve_mcp_binding(self, binding: AgentMcpBinding) -> MCPClient:
+    def _resolve_mcp_binding(
+        self,
+        binding: AgentMcpBinding,
+        skillhub_token: str | None,
+    ) -> MCPClient:
         """Resolve one MCP binding into an MCP client."""
         raw_config = self._first_record(
             binding.config_json,
@@ -387,6 +425,11 @@ class AgentBindingResolver:
             keys=("mcp_client", "mcpClient", "mcp_config", "mcpConfig"),
         )
         if raw_config is not None:
+            raw_config = self._with_skillhub_auth_headers(
+                binding,
+                raw_config,
+                skillhub_token,
+            )
             if "mcp_config" in raw_config:
                 return MCPClient.model_validate(raw_config)
             return MCPClient(
@@ -416,6 +459,7 @@ class AgentBindingResolver:
             is_stateful=bool(binding.config_json.get("is_stateful", False)),
             mcp_config=HttpMCPConfig(
                 url=endpoint_url,
+                headers=self._skillhub_auth_headers(binding, skillhub_token),
                 timeout=self._float_or_none(binding.config_json.get("timeout")),
             ),
             enable_tools=self._string_list(binding.config_json.get("enable_tools")),
@@ -424,6 +468,75 @@ class AgentBindingResolver:
                 binding.config_json.get("execution_timeout"),
             ),
         )
+
+    @classmethod
+    def _with_skillhub_auth_headers(
+        cls,
+        binding: AgentMcpBinding,
+        raw_config: dict[str, Any],
+        skillhub_token: str | None,
+    ) -> dict[str, Any]:
+        """Return a copy of an MCP config with SkillHub auth headers applied."""
+        headers = cls._skillhub_auth_headers(binding, skillhub_token)
+        if not headers:
+            return raw_config
+
+        next_config = dict(raw_config)
+        nested = next_config.get("mcp_config")
+        if isinstance(nested, dict):
+            if not cls._is_http_mcp_config(nested):
+                return next_config
+            next_nested = dict(nested)
+            existing_headers = next_nested.get("headers")
+            next_nested["headers"] = cls._merge_headers(existing_headers, headers)
+            next_config["mcp_config"] = next_nested
+            return next_config
+
+        if not cls._is_http_mcp_config(next_config):
+            return next_config
+        existing_headers = next_config.get("headers")
+        next_config["headers"] = cls._merge_headers(existing_headers, headers)
+        return next_config
+
+    @classmethod
+    def _skillhub_auth_headers(
+        cls,
+        binding: AgentMcpBinding,
+        skillhub_token: str | None,
+    ) -> dict[str, str] | None:
+        """Build runtime-only auth headers for SkillHub-hosted MCP servers."""
+        if binding.source != "skillhub" or not skillhub_token:
+            return None
+        normalized = skillhub_token.strip()
+        if not normalized:
+            return None
+        return {
+            "Authorization": f"Bearer {normalized}",
+            "x-skillhub-token": normalized,
+        }
+
+    @staticmethod
+    def _is_http_mcp_config(value: dict[str, Any]) -> bool:
+        """Return whether an MCP config dictionary represents HTTP transport."""
+        return value.get("type") == "http_mcp" or isinstance(value.get("url"), str)
+
+    @staticmethod
+    def _merge_headers(
+        existing: Any,
+        headers: dict[str, str],
+    ) -> dict[str, str]:
+        """Merge only string-valued existing headers with required headers."""
+        merged: dict[str, str] = {}
+        if isinstance(existing, dict):
+            merged.update(
+                {
+                    str(key): value
+                    for key, value in existing.items()
+                    if isinstance(value, str)
+                },
+            )
+        merged.update(headers)
+        return merged
 
     @staticmethod
     def _extract_zip_safely(archive: bytes, target_dir: Path) -> None:
@@ -616,3 +729,34 @@ class AgentBindingResolver:
             if name:
                 fingerprints[name] = binding.model_dump_json()
         return fingerprints
+
+    @classmethod
+    def _skillhub_mcp_names_missing_auth(
+        cls,
+        record: AgentRecord,
+        existing_mcps: list[MCPClient],
+        skillhub_token: str | None,
+    ) -> set[str]:
+        """Return existing SkillHub MCP names that need token headers refreshed."""
+        by_name = {mcp.name: mcp for mcp in existing_mcps}
+        names: set[str] = set()
+        for binding in record.data.mcp_bindings:
+            if not binding.enabled or binding.source != "skillhub":
+                continue
+            expected_headers = cls._skillhub_auth_headers(binding, skillhub_token)
+            if not expected_headers:
+                continue
+            name = cls._mcp_binding_name(binding)
+            existing = by_name.get(name)
+            if existing is None:
+                continue
+            config = getattr(existing, "mcp_config", None)
+            if not isinstance(config, HttpMCPConfig):
+                continue
+            current_headers = config.headers or {}
+            if any(
+                current_headers.get(key) != value
+                for key, value in expected_headers.items()
+            ):
+                names.add(name)
+        return names

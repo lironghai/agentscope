@@ -15,9 +15,7 @@ import {
 } from '@/components/ui/empty';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-type McpTab = 'servers' | 'internal';
 const PAGE_SIZE = 24;
 const SCROLL_LOAD_THRESHOLD = 240;
 
@@ -102,7 +100,6 @@ function appendUniqueMcps(
 
 export function McpsPage() {
 	const { t } = useTranslation();
-	const [tab, setTab] = useState<McpTab>('servers');
 	const [query, setQuery] = useState('');
 	const [submittedQuery, setSubmittedQuery] = useState('');
 	const [items, setItems] = useState<SkillHubCatalogItem[]>([]);
@@ -123,18 +120,11 @@ export function McpsPage() {
 		}
 		setError(null);
 		try {
-			const response =
-				tab === 'servers'
-					? await globalCatalogApi.listMcpServers({
-							search: submittedQuery,
-							page: nextPage,
-							size: PAGE_SIZE,
-						})
-					: await globalCatalogApi.listInternalMcpServers({
-							search: submittedQuery,
-							page: nextPage,
-							size: PAGE_SIZE,
-						});
+			const response = await globalCatalogApi.listInternalMcpServers({
+				search: submittedQuery,
+				page: nextPage,
+				size: PAGE_SIZE,
+			});
 			setItems((current) =>
 				append ? appendUniqueMcps(current, response.items) : response.items,
 			);
@@ -155,7 +145,7 @@ export function McpsPage() {
 				setLoading(false);
 			}
 		}
-	}, [submittedQuery, tab, t]);
+	}, [submittedQuery, t]);
 
 	useEffect(() => {
 		loadPage(0);
@@ -210,94 +200,77 @@ export function McpsPage() {
 					</form>
 				</div>
 			</header>
-			<Tabs
-				value={tab}
-				onValueChange={(value) => setTab(value as McpTab)}
-				className="min-h-0 flex-1 gap-0"
+			<section
+				className="min-h-0 flex-1 overflow-y-auto p-6"
+				onScroll={handleScroll}
 			>
-				<div className="border-b px-6 py-3">
-					<TabsList>
-						<TabsTrigger value="servers">
-							{t('globalCatalog.mcps.catalogTab')}
-						</TabsTrigger>
-						<TabsTrigger value="internal">
-							{t('globalCatalog.mcps.internalTab')}
-						</TabsTrigger>
-					</TabsList>
+				<div className="mb-4 flex items-center justify-between text-sm text-muted-foreground">
+					<span>
+						{t('globalCatalog.shown', {
+							shown: items.length,
+							total,
+						})}
+					</span>
+					{loading ? <Spinner /> : null}
 				</div>
-				<TabsContent
-					value={tab}
-					className="min-h-0 overflow-y-auto p-6"
-					onScroll={handleScroll}
-				>
-					<div className="mb-4 flex items-center justify-between text-sm text-muted-foreground">
-						<span>
-							{t('globalCatalog.shown', {
-								shown: items.length,
-								total,
-							})}
-						</span>
-						{loading ? <Spinner /> : null}
-					</div>
-					{error ? (
-						<Empty className="border-none">
-							<EmptyHeader>
-								<EmptyMedia variant="icon">
-									<Plug />
-								</EmptyMedia>
-								<EmptyTitle>{t('globalCatalog.errorTitle')}</EmptyTitle>
-								<EmptyDescription>{error}</EmptyDescription>
-							</EmptyHeader>
-						</Empty>
-					) : items.length === 0 && !loading ? (
-						<Empty className="border-none">
-							<EmptyHeader>
-								<EmptyMedia variant="icon">
-									<Plug />
-								</EmptyMedia>
-								<EmptyTitle>{t('globalCatalog.mcps.emptyTitle')}</EmptyTitle>
-								<EmptyDescription>
-									{t('globalCatalog.mcps.emptyDescription')}
-								</EmptyDescription>
-							</EmptyHeader>
-						</Empty>
-					) : (
-						<>
-							<div className="grid grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-3">
-								{items.map((server, index) => (
-									<McpCard
-										key={getMcpKey(server, index)}
-										server={server}
-									/>
-								))}
-							</div>
-							<div className="flex min-h-16 items-center justify-center py-5">
-								{hasMore ? (
-									<Button
-										type="button"
-										variant="outline"
-										onClick={loadMore}
-										disabled={loadingMore}
-									>
-										{loadingMore ? (
-											<Spinner />
-										) : (
-											<ChevronDown className="size-4" />
-										)}
-										{loadingMore
-											? t('globalCatalog.loadingMore')
-											: t('globalCatalog.loadMore')}
-									</Button>
-								) : total > 0 ? (
-									<span className="text-sm text-muted-foreground">
-										{t('globalCatalog.allLoaded')}
-									</span>
-								) : null}
-							</div>
-						</>
-					)}
-				</TabsContent>
-			</Tabs>
+				{error ? (
+					<Empty className="border-none">
+						<EmptyHeader>
+							<EmptyMedia variant="icon">
+								<Plug />
+							</EmptyMedia>
+							<EmptyTitle>{t('globalCatalog.errorTitle')}</EmptyTitle>
+							<EmptyDescription>{error}</EmptyDescription>
+						</EmptyHeader>
+					</Empty>
+				) : items.length === 0 && !loading ? (
+					<Empty className="border-none">
+						<EmptyHeader>
+							<EmptyMedia variant="icon">
+								<Plug />
+							</EmptyMedia>
+							<EmptyTitle>{t('globalCatalog.mcps.emptyTitle')}</EmptyTitle>
+							<EmptyDescription>
+								{t('globalCatalog.mcps.emptyDescription')}
+							</EmptyDescription>
+						</EmptyHeader>
+					</Empty>
+				) : (
+					<>
+						<div className="grid grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-3">
+							{items.map((server, index) => (
+								<McpCard
+									key={getMcpKey(server, index)}
+									server={server}
+								/>
+							))}
+						</div>
+						<div className="flex min-h-16 items-center justify-center py-5">
+							{hasMore ? (
+								<Button
+									type="button"
+									variant="outline"
+									onClick={loadMore}
+									disabled={loadingMore}
+								>
+									{loadingMore ? (
+										<Spinner />
+									) : (
+										<ChevronDown className="size-4" />
+									)}
+									{loadingMore
+										? t('globalCatalog.loadingMore')
+										: t('globalCatalog.loadMore')}
+								</Button>
+							) : total > 0 ? (
+								<span className="text-sm text-muted-foreground">
+									{t('globalCatalog.allLoaded')}
+								</span>
+							) : null}
+						</div>
+					</>
+				)}
+			</section>
 		</main>
 	);
 }

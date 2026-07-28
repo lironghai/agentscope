@@ -152,14 +152,14 @@ export function EditAgentDialog({ open, onOpenChange, agent, onUpdated }: Props)
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="!w-[640px] !max-w-[640px]">
+			<DialogContent className="!max-h-[88dvh] !w-[calc(100vw-2rem)] !max-w-[calc(100vw-2rem)] sm:!w-[92vw] lg:!w-[960px] lg:!max-w-[960px]">
 				<DialogHeader>
 					<DialogTitle>{t('dialog-agent-edit.title')}</DialogTitle>
 					<DialogDescription className="sr-only">
 						{t('dialog-agent-edit.description')}
 					</DialogDescription>
 				</DialogHeader>
-				<div className="no-scrollbar -mx-4 max-h-[75vh] overflow-y-auto px-4">
+				<div className="no-scrollbar -mx-4 max-h-[calc(88dvh-9rem)] overflow-y-auto px-4">
 					{schema && values ? (
 						<>
 							<AgentFormFields schema={schema} values={values} onChange={handleChange} />

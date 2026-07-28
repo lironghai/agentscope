@@ -170,12 +170,10 @@ export function AgentCatalogBindings({
 		setLoading(true);
 		setSkillError('');
 		setMcpError('');
-		const [skillResult, catalogMcpResult, internalMcpResult] =
-			await Promise.allSettled([
-				globalCatalogApi.listSkills({ sort: 'newest', page: 0, size: 100 }),
-				globalCatalogApi.listMcpServers({ page: 0, size: 100 }),
-				globalCatalogApi.listInternalMcpServers({ page: 0, size: 100 }),
-			]);
+		const [skillResult, internalMcpResult] = await Promise.allSettled([
+			globalCatalogApi.listSkills({ sort: 'newest', page: 0, size: 100 }),
+			globalCatalogApi.listInternalMcpServers({ page: 0, size: 100 }),
+		]);
 
 		if (skillResult.status === 'fulfilled') {
 			setSkills(skillResult.value.items ?? []);
@@ -188,21 +186,13 @@ export function AgentCatalogBindings({
 			);
 		}
 
-		const mcpItems: SkillHubCatalogItem[] = [];
-		if (catalogMcpResult.status === 'fulfilled') {
-			mcpItems.push(...(catalogMcpResult.value.items ?? []));
-		}
 		if (internalMcpResult.status === 'fulfilled') {
-			mcpItems.push(...(internalMcpResult.value.items ?? []));
-		}
-		setMcps(mcpItems);
-		if (
-			catalogMcpResult.status === 'rejected' &&
-			internalMcpResult.status === 'rejected'
-		) {
+			setMcps(internalMcpResult.value.items ?? []);
+		} else {
+			setMcps([]);
 			setMcpError(
-				catalogMcpResult.reason instanceof Error
-					? catalogMcpResult.reason.message
+				internalMcpResult.reason instanceof Error
+					? internalMcpResult.reason.message
 					: t('agent-bindings.loadError'),
 			);
 		}
@@ -272,7 +262,7 @@ export function AgentCatalogBindings({
 						{skillError ? (
 							<p className="text-destructive text-xs">{skillError}</p>
 						) : (
-							<div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+							<div className="max-h-72 space-y-2 overflow-y-auto pr-1">
 								{skills.length === 0 && !loading ? (
 									<p className="text-muted-foreground text-xs">
 										{t('agent-bindings.emptySkills')}
@@ -306,7 +296,7 @@ export function AgentCatalogBindings({
 						{mcpError ? (
 							<p className="text-destructive text-xs">{mcpError}</p>
 						) : (
-							<div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+							<div className="max-h-72 space-y-2 overflow-y-auto pr-1">
 								{mcps.length === 0 && !loading ? (
 									<p className="text-muted-foreground text-xs">
 										{t('agent-bindings.emptyMcps')}

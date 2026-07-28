@@ -120,6 +120,12 @@ export interface AgentToolConfig {
 	defaults?: Record<string, unknown>;
 }
 
+export interface AgentToolCatalogItem {
+	name: string;
+	description: string;
+	source: string;
+}
+
 export interface AgentData {
 	id: string;
 	name: string;

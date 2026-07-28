@@ -1,12 +1,17 @@
-import { PlusCircle, Search, SearchX, Trash, Unplug } from 'lucide-react';
+import { ChevronDown, PlusCircle, Search, SearchX, Trash, Unplug } from 'lucide-react';
 import { useState } from 'react';
 
-import type { AgentMcpBinding, MCPClient, MCPClientStatus } from '@/api';
+import type { AgentMcpBinding, MCPClient, MCPClientStatus, ToolInfo } from '@/api';
 import { DeleteDialog } from '@/components/dialog/DeleteDialog.tsx';
 import { CreateMCPDialog } from '@/components/dialog/MCPDialog.tsx';
 import { PanelEmpty } from '@/components/panel/PanelEmpty';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from '@/components/ui/item';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
@@ -32,6 +37,49 @@ function materializedMcpName(binding: AgentMcpBinding): string | null {
 	if (name) return name;
 	const id = normalized(binding.skillhub_server_id);
 	return id ? safeSegment(id) : 'skillhub_mcp';
+}
+
+function McpToolsDisclosure({ tools }: { tools: ToolInfo[] }) {
+	const { t } = useTranslation();
+	if (tools.length === 0) {
+		return (
+			<KbdGroup>
+				<Kbd>{t('panel.mcp.tools', { count: 0 })}</Kbd>
+			</KbdGroup>
+		);
+	}
+
+	return (
+		<Collapsible>
+			<CollapsibleTrigger asChild>
+				<Button
+					type="button"
+					variant="outline"
+					size="xs"
+					className="h-6 gap-1 rounded-md px-2 text-xs font-normal text-muted-foreground [&[data-state=open]>svg]:rotate-180"
+				>
+					{t('panel.mcp.tools', { count: tools.length })}
+					<ChevronDown className="size-3 transition-transform" />
+				</Button>
+			</CollapsibleTrigger>
+			<CollapsibleContent>
+				<div className="mt-2 max-h-64 space-y-1.5 overflow-y-auto rounded-md border bg-muted/20 p-2">
+					{tools.map((tool) => (
+						<div key={tool.name} className="rounded-sm px-1 py-0.5">
+							<div className="truncate text-xs font-medium text-foreground">
+								{tool.name}
+							</div>
+							{tool.description ? (
+								<div className="mt-0.5 line-clamp-3 text-xs text-muted-foreground">
+									{tool.description}
+								</div>
+							) : null}
+						</div>
+					))}
+				</div>
+			</CollapsibleContent>
+		</Collapsible>
+	);
 }
 
 interface McpPanelProps {
@@ -145,17 +193,15 @@ export function McpPanel({
 										className={`size-2 shrink-0 rounded-full ${mcp.is_healthy ? 'bg-green-500' : 'bg-red-500'}`}
 									/>
 									{mcp.name}
-								</ItemTitle>
-								<ItemDescription>
+									</ItemTitle>
+								<div className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
 									<KbdGroup>
 										<Kbd>
 											{mcp.mcp_config.type === 'stdio_mcp' ? 'STDIO' : 'HTTP'}
 										</Kbd>
-										<Kbd>
-											{t('panel.mcp.tools', { count: mcp.tools.length })}
-										</Kbd>
 									</KbdGroup>
-								</ItemDescription>
+									<McpToolsDisclosure tools={mcp.tools} />
+								</div>
 							</ItemContent>
 							<ItemActions>
 								<Button

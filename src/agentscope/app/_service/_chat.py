@@ -55,12 +55,13 @@ from ...agent import Agent, ModelConfig
 from ...event import (
     AgentEvent,
     ReplyEndEvent,
-    ReplyEndReason,
     ReplyStartEvent,
+    ReplyFinishedReason,
     UserConfirmResultEvent,
     ExternalExecutionResultEvent,
     UserInterruptEvent,
 )
+from ._errors import _classify_error
 from ...message import AssistantMsg, Msg, ToolCallState
 from ...permission import AdditionalWorkingDirectory
 
@@ -754,21 +755,38 @@ class ChatService:
                     recorder.complete_stage(event_loop_stage)
                     event_loop_stage = None
 
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=broad-except
                 if event_loop_stage is not None:
                     recorder.complete_stage(event_loop_stage, "error", exc)
                     event_loop_stage = None
-                if reply_msg is not None and reply_msg.finished_at is None:
-                    reply_msg.append_event(
-                        ReplyEndEvent(
-                            session_id=session_id,
-                            reply_id=reply_msg.id,
-                            finished_reason=ReplyEndReason.INTERRUPTED,
-                        ),
+                # The reply stream died before emitting its terminating
+                # ReplyEndEvent. Synthesize one so the reply is closed on
+                # both channels (publish → live SSE stops loading;
+                # append_event → persisted reply gets finished_at/reason/
+                # error for refresh), then re-raise for logging + the
+                # finally-persist. CancelledError is a BaseException, so
+                # interrupts are unaffected; reply_msg is None only when we
+                # failed before REPLY_START (nothing to close). The
+                # finished_reason guard skips the case where the agent
+                # already closed the reply and the failure is downstream
+                # (publish/projection) — don't overwrite a completed reply.
+                if reply_msg is not None and reply_msg.finished_reason is None:
+                    end_event = ReplyEndEvent(
+                        session_id=session_id,
+                        reply_id=reply_msg.id,
+                        finished_reason=ReplyFinishedReason.ERROR,
+                        error=_classify_error(exc),
+                    )
+                    reply_msg.append_event(end_event)
+                    await publish_session_event(
+                        self._message_bus,
+                        session_id,
+                        end_event.model_dump(mode="json"),
                     )
                 recorder.finish("error", exc)
                 await recorder.safe_persist(logger)
                 raise
+
             finally:
                 # All persistence in a single coroutine, shielded from
                 # outer cancellation.  Must complete BEFORE the session

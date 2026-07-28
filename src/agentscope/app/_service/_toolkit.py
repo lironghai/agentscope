@@ -35,22 +35,32 @@ from ._access import ResourceAccessService
 
 
 _TOOL_NAME_ALIASES = {
-    "bash": "Bash",
-    "shell": "Bash",
-    "edit": "Edit",
-    "glob": "Glob",
-    "grep": "Grep",
-    "read": "Read",
-    "read_file": "Read",
-    "write": "Write",
-    "write_file": "Write",
+    "bash": ("Bash",),
+    "powershell": ("PowerShell",),
+    "pwsh": ("PowerShell",),
+    "shell": ("Bash", "PowerShell"),
+    "edit": ("Edit",),
+    "glob": ("Glob",),
+    "grep": ("Grep",),
+    "read": ("Read",),
+    "read_file": ("Read",),
+    "write": ("Write",),
+    "write_file": ("Write",),
 }
 
 
 def _normalize_tool_name(name: str) -> str:
     """Normalize user-facing tool names to runtime tool names."""
     stripped = name.strip()
-    return _TOOL_NAME_ALIASES.get(stripped.lower(), stripped)
+    aliases = _TOOL_NAME_ALIASES.get(stripped.lower())
+    return aliases[0] if aliases else stripped
+
+
+def _normalize_configured_tool_names(name: str) -> set[str]:
+    """Expand a configured tool name or alias to runtime tool names."""
+    stripped = name.strip()
+    aliases = _TOOL_NAME_ALIASES.get(stripped.lower())
+    return set(aliases) if aliases else {stripped}
 
 
 def _filter_tools_for_agent_config(
@@ -58,14 +68,18 @@ def _filter_tools_for_agent_config(
     agent_record: AgentRecord,
 ) -> list:
     """Filter exposed tools using Agent-level allow/deny configuration."""
-    allow = {
-        _normalize_tool_name(name)
-        for name in agent_record.data.tool_config.allow
-    }
-    deny = {
-        _normalize_tool_name(name)
-        for name in agent_record.data.tool_config.deny
-    }
+    allow = set().union(
+        *(
+            _normalize_configured_tool_names(name)
+            for name in agent_record.data.tool_config.allow
+        ),
+    )
+    deny = set().union(
+        *(
+            _normalize_configured_tool_names(name)
+            for name in agent_record.data.tool_config.deny
+        ),
+    )
     if not allow and not deny:
         return tools
     filtered = []

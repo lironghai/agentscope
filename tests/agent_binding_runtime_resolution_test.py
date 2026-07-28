@@ -72,6 +72,7 @@ from agentscope.app.storage import (
     SessionRecord,
 )
 from agentscope.agent import ContextConfig, ReActConfig
+from agentscope.mcp import HttpMCPConfig, MCPClient
 from agentscope.skill import Skill
 
 
@@ -561,6 +562,59 @@ def test_binding_resolver_materializes_enabled_skill_and_mcp(
     asyncio.run(run())
 
 
+def test_binding_resolver_adds_skillhub_token_to_mcp_http_config() -> None:
+    """SkillHub MCP bindings should carry the user's token at runtime."""
+    async def run() -> None:
+        resolver = AgentBindingResolver()
+        workspace = _FakeWorkspace()
+        agent = AgentRecord(
+            id="agent-1",
+            user_id="user-1",
+            data=AgentData(
+                name="agent",
+                context_config=ContextConfig(),
+                react_config=ReActConfig(),
+                mcp_bindings=[
+                    AgentMcpBinding(
+                        source="skillhub",
+                        skillhub_server_id="bdc4_group",
+                        name="bdc4_group",
+                        endpoint_url="https://skillhub.example.com/mcp/bdc4",
+                        transport="http",
+                    ),
+                    AgentMcpBinding(
+                        source="custom",
+                        name="custom_mcp",
+                        endpoint_url="https://mcp.example.com/custom",
+                    ),
+                ],
+            ),
+        )
+
+        result = await resolver.materialize_agent_bindings(
+            user_id="user-1",
+            agent_record=agent,
+            workspace=workspace,
+            skillhub_token=" user-token ",
+        )
+
+        assert result.errors == []
+        assert result.mcps_added == 2
+        skillhub_mcp = next(
+            mcp for mcp in workspace.mcps if mcp.name == "bdc4_group"
+        )
+        custom_mcp = next(
+            mcp for mcp in workspace.mcps if mcp.name == "custom_mcp"
+        )
+        assert skillhub_mcp.mcp_config.headers == {
+            "Authorization": "Bearer user-token",
+            "x-skillhub-token": "user-token",
+        }
+        assert custom_mcp.mcp_config.headers is None
+
+    asyncio.run(run())
+
+
 def test_binding_resolver_does_not_partially_materialize_on_errors(
     tmp_path: Path,
 ) -> None:
@@ -692,6 +746,61 @@ def test_binding_resolver_reconciles_agent_binding_edits(
         assert [mcp.name for mcp in workspace.mcps] == ["new-mcp"]
         assert result.skills_added == 1
         assert result.mcps_added == 1
+
+    asyncio.run(run())
+
+
+def test_binding_resolver_refreshes_existing_skillhub_mcp_auth() -> None:
+    """Existing SkillHub HTTP MCPs should be refreshed when auth headers are absent."""
+    async def run() -> None:
+        resolver = AgentBindingResolver()
+        workspace = _FakeWorkspace()
+        workspace.mcps = [
+            MCPClient(
+                name="bdc4_group",
+                is_stateful=False,
+                mcp_config=HttpMCPConfig(
+                    url="https://skillhub.example.com/mcp/bdc4",
+                ),
+            ),
+        ]
+        before = _agent_with_defaults(
+            mcp_bindings=[
+                AgentMcpBinding(
+                    source="skillhub",
+                    skillhub_server_id="bdc4_group",
+                    name="bdc4_group",
+                    endpoint_url="https://skillhub.example.com/mcp/bdc4",
+                ),
+            ],
+        )
+        after = _agent_with_defaults(
+            mcp_bindings=[
+                AgentMcpBinding(
+                    source="skillhub",
+                    skillhub_server_id="bdc4_group",
+                    name="bdc4_group",
+                    endpoint_url="https://skillhub.example.com/mcp/bdc4",
+                ),
+            ],
+        )
+
+        result = await resolver.reconcile_agent_bindings(
+            user_id="user-1",
+            before_agent_record=before,
+            after_agent_record=after,
+            workspace=workspace,
+            skillhub_token="user-token",
+        )
+
+        assert result.errors == []
+        assert result.mcps_added == 1
+        assert workspace.removed_mcps == ["bdc4_group"]
+        assert len(workspace.mcps) == 1
+        assert workspace.mcps[0].mcp_config.headers == {
+            "Authorization": "Bearer user-token",
+            "x-skillhub-token": "user-token",
+        }
 
     asyncio.run(run())
 

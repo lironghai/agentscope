@@ -689,22 +689,18 @@ export function ChatViewport({
 									onInterrupt={interrupt}
 									footerSlot={
 										subagentHitl.length > 0 ? (
-											<div className="space-y-2 pb-2">
-												{subagentHitl.map((entry) => (
-													<SubagentHitlCard
-														key={`${entry.worker_session_id}:${entry.reply_id}`}
-														entry={entry}
-														onConfirm={(toolCall, confirm, rules) =>
-															onSubagentConfirm(
-																entry,
-																toolCall,
-																confirm,
-																rules,
-															)
-														}
-													/>
-												))}
-											</div>
+											<SubagentHitlCard
+												key={`${subagentHitl[0].worker_session_id}:${subagentHitl[0].reply_id}`}
+												entry={subagentHitl[0]}
+												onConfirm={(toolCall, confirm, rules) =>
+													onSubagentConfirm(
+														subagentHitl[0],
+														toolCall,
+														confirm,
+														rules,
+													)
+												}
+											/>
 										) : null
 									}
 									allowedInputTypes={(
@@ -730,6 +726,7 @@ export function ChatViewport({
 														file.type || 'application/octet-stream',
 												},
 												name: file.name,
+												created_at: new Date().toISOString(),
 											};
 										}
 										if (file.type === 'text/plain') {
@@ -738,6 +735,7 @@ export function ChatViewport({
 												id: crypto.randomUUID(),
 												type: 'text' as const,
 												text: `[File: ${file.name}]\n${text}`,
+												created_at: new Date().toISOString(),
 											};
 										}
 										const buffer = await file.arrayBuffer();
@@ -756,6 +754,7 @@ export function ChatViewport({
 												data: base64,
 											},
 											name: file.name,
+											created_at: new Date().toISOString(),
 										};
 									}}
 								/>

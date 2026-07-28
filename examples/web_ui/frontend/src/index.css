@@ -2,6 +2,8 @@
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 @import '@fontsource-variable/geist';
+@source '../node_modules/streamdown/dist/*.js';
+@source '../node_modules/@streamdown/*/dist/*.js';
 
 @plugin '@tailwindcss/typography';
 
@@ -30,8 +32,8 @@ body,
 	--heading: system-ui, 'Segoe UI', Roboto, sans-serif;
 	--mono: ui-monospace, Consolas, monospace;
 
-	/*font: 18px/145% var(--sans);*/
-	letter-spacing: 0.18px;
+	font-size: 17px;
+	letter-spacing: 0;
 	color-scheme: light dark;
 	color: var(--text);
 	background: var(--bg);
@@ -39,10 +41,6 @@ body,
 	text-rendering: optimizeLegibility;
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
-
-	@media (max-width: 1024px) {
-		font-size: 16px;
-	}
 
 	--background: oklch(1 0 0);
 

@@ -14,7 +14,7 @@ from ._agent import (
 )
 from ._credential import CredentialRecord
 from ._execution_trace import ExecutionTraceRecord, ExecutionTraceStatus
-from ._knowledge_base import KnowledgeBaseRecord
+from ._knowledge_base import KnowledgeBaseData, KnowledgeBaseRecord
 from ._knowledge_document import (
     KnowledgeDocumentData,
     KnowledgeDocumentRecord,
@@ -44,6 +44,7 @@ __all__ = [
     "CredentialRecord",
     "ExecutionTraceRecord",
     "ExecutionTraceStatus",
+    "KnowledgeBaseData",
     "KnowledgeBaseRecord",
     "KnowledgeDocumentData",
     "KnowledgeDocumentRecord",
