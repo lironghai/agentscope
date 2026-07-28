@@ -1,6 +1,6 @@
 import { Check, ChevronDown } from 'lucide-react';
 
-import type { AgentView } from '@/api';
+import type { AgentListView } from '@/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -15,7 +15,7 @@ import {
 import { useTranslation } from '@/i18n/useI18n.ts';
 
 interface Props {
-	agents: AgentView[];
+	agents: AgentListView[];
 	/** Currently selected agent id, or `null` when none is selected. */
 	value?: string | null;
 	onChange?: (agentId: string) => void;
@@ -45,7 +45,7 @@ export function AgentSelect({ agents, value, onChange, placeholder }: Props) {
 	const yours = agents.filter((a) => a.editable);
 	const shared = agents.filter((a) => !a.editable);
 
-	const renderItem = (agent: AgentView) => {
+	const renderItem = (agent: AgentListView) => {
 		const isSelected = agent.id === value;
 		return (
 			<DropdownMenuItem key={agent.id} onSelect={() => onChange?.(agent.id)}>

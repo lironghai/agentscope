@@ -76,6 +76,25 @@ class StorageBase(ABC):
         """
 
     @abstractmethod
+    async def list_shared_credentials(
+        self,
+        viewer_id: str,
+    ) -> list[CredentialRecord]:
+        """List shared credentials visible to ``viewer_id``.
+
+        The storage backend owns the share index so policies can enumerate
+        cross-owner credential records without scanning every user.
+
+        Args:
+            viewer_id (`str`):
+                The current viewer's user id.
+
+        Returns:
+            `list[CredentialRecord]`:
+                Shared credential records owned by other users.
+        """
+
+    @abstractmethod
     async def get_credential(
         self,
         user_id: str,

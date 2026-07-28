@@ -35,14 +35,24 @@ class ResourcePermission(StrEnum):
     Values:
         READ: The viewer can see and use the resource. Credentials remain
             masked in API responses and can only be used by runtime code.
+        CLONE: The viewer can read/use the resource and clone it into their
+            own ownership boundary.
+        RUN: The viewer can read/use the Agent for runtime execution.
         EDIT: The viewer can read/use the resource and also mutate it. This
             is equivalent to co-owner access for the specific resource.
 
-    ``EDIT`` implies ``READ``.
+    ``EDIT`` implies lower tiers. Non-``EDIT`` tiers are read-only from the
+    resource mutation perspective.
     """
 
     READ = "read"
     """Read/use access."""
+
+    CLONE = "clone"
+    """Read/use access plus clone permission."""
+
+    RUN = "run"
+    """Read/use access plus runtime execution permission."""
 
     EDIT = "edit"
     """Read/use access plus mutation rights."""

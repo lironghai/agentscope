@@ -12,6 +12,8 @@ from ._schedule import (
     UpdateScheduleRequest,
 )
 from ._agent import (
+    AgentListData,
+    AgentListView,
     AgentSchemaResponse,
     AgentSchemaV2Response,
     ListAgentsResponse,
@@ -42,6 +44,10 @@ from ._knowledge_base import (
     UpdateKnowledgeBaseRequest,
     UploadKnowledgeDocumentResponse,
 )
+from ._skillhub_catalog import (
+    SkillHubCatalogConfigResponse,
+    SkillHubCatalogResponse,
+)
 from ._session import (
     CreateSessionRequest,
     CreateSessionResponse,
@@ -60,9 +66,12 @@ from ._session import (
     TeamMemberView,
     UpdateMemoryFileRequest,
 )
+from ._subagent import ListSubagentRunsResponse
 
 __all__ = [
     # Agent
+    "AgentListData",
+    "AgentListView",
     "AgentSchemaResponse",
     "AgentSchemaV2Response",
     "ListAgentsResponse",
@@ -94,6 +103,9 @@ __all__ = [
     "SearchKnowledgeBaseResponse",
     "UpdateKnowledgeBaseRequest",
     "UploadKnowledgeDocumentResponse",
+    # SkillHub catalog
+    "SkillHubCatalogConfigResponse",
+    "SkillHubCatalogResponse",
     # Model
     "ListModelsRequest",
     "ListModelsResponse",
@@ -120,6 +132,7 @@ __all__ = [
     "SessionStatus",
     "SessionStatusResponse",
     "SessionView",
+    "ListSubagentRunsResponse",
     "TeamDetailResponse",
     "TeamMemberView",
     "UpdateMemoryFileRequest",

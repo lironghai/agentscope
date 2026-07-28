@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """Credential router — CRUD endpoints for API key credentials."""
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..access import ResourceKind
 from ..deps import (
     get_current_user_id,
+    get_admin_user_ids,
     get_resource_access_service,
     get_storage,
 )
@@ -17,13 +18,27 @@ from ._schema import (
 )
 from .._service import CredentialView, ResourceAccessService
 from ..storage import StorageBase
-from ...credential import CredentialFactory
+from ...credential import CredentialBase, CredentialFactory
 
 credential_router = APIRouter(
     prefix="/credential",
     tags=["credential"],
     responses={404: {"description": "Not found"}},
 )
+
+
+def _ensure_can_share_credential(
+    user_id: str,
+    admin_user_ids: set[str],
+    credential: CredentialBase,
+) -> None:
+    """Reject shared credentials unless the caller is an admin."""
+    if not credential.shared or user_id in admin_user_ids:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Only administrators can create shared credentials.",
+    )
 
 
 @credential_router.get(
@@ -87,6 +102,7 @@ async def create_credential(
     body: CreateCredentialRequest,
     user_id: str = Depends(get_current_user_id),
     storage: StorageBase = Depends(get_storage),
+    admin_user_ids: set[str] = Depends(get_admin_user_ids),
 ) -> CreateCredentialResponse:
     """Store a new credential.
 
@@ -98,10 +114,9 @@ async def create_credential(
     Returns:
         `CreateCredentialResponse`: The server-assigned credential identifier.
     """
-    credential_id = await storage.upsert_credential(
-        user_id,
-        CredentialFactory.from_dict(body.data),
-    )
+    credential = CredentialFactory.from_dict(body.data)
+    _ensure_can_share_credential(user_id, admin_user_ids, credential)
+    credential_id = await storage.upsert_credential(user_id, credential)
     return CreateCredentialResponse(credential_id=credential_id)
 
 
@@ -116,6 +131,7 @@ async def update_credential(
     user_id: str = Depends(get_current_user_id),
     storage: StorageBase = Depends(get_storage),
     access: ResourceAccessService = Depends(get_resource_access_service),
+    admin_user_ids: set[str] = Depends(get_admin_user_ids),
 ) -> CredentialView:
     """Replace the payload of an existing credential.
 
@@ -142,6 +158,7 @@ async def update_credential(
     )
 
     credential = CredentialFactory.from_dict(body.data)
+    _ensure_can_share_credential(user_id, admin_user_ids, credential)
     credential.id = credential_id
     await storage.upsert_credential(owner_id, credential)
     # ``resolve_for_edit`` proved the record existed under ``owner_id``

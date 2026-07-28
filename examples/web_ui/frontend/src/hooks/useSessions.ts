@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 import { sessionApi } from '../api';
 import type { SessionView, CreateSessionRequest, UpdateSessionRequest } from '../api';
@@ -17,23 +17,43 @@ import type { SessionView, CreateSessionRequest, UpdateSessionRequest } from '..
  */
 export function useSessions(agentId: string | null) {
 	const [sessions, setSessions] = useState<SessionView[]>([]);
+	const [loadedAgentId, setLoadedAgentId] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<Error | null>(null);
+	const currentAgentRef = useRef(agentId);
+
+	useEffect(() => {
+		currentAgentRef.current = agentId;
+	}, [agentId]);
 
 	const refetch = useCallback(async () => {
 		if (!agentId) {
 			setSessions([]);
+			setLoadedAgentId(null);
+			setLoading(false);
 			return;
 		}
+		const requestAgentId = agentId;
+		setSessions([]);
+		setLoadedAgentId(null);
 		setLoading(true);
 		setError(null);
 		try {
-			const res = await sessionApi.list(agentId);
-			setSessions(res.sessions);
+			const res = await sessionApi.list(requestAgentId);
+			if (currentAgentRef.current === requestAgentId) {
+				setSessions(res.sessions);
+				setLoadedAgentId(requestAgentId);
+			}
 		} catch (e) {
-			setError(e as Error);
+			if (currentAgentRef.current === requestAgentId) {
+				setSessions([]);
+				setError(e as Error);
+				setLoadedAgentId(null);
+			}
 		} finally {
-			setLoading(false);
+			if (currentAgentRef.current === requestAgentId) {
+				setLoading(false);
+			}
 		}
 	}, [agentId]);
 
@@ -72,5 +92,10 @@ export function useSessions(agentId: string | null) {
 		[agentId, refetch],
 	);
 
-	return { sessions, loading, error, refetch, create, update, remove };
+	const visibleSessions = useMemo(
+		() => (loadedAgentId === agentId ? sessions : []),
+		[agentId, loadedAgentId, sessions],
+	);
+
+	return { sessions: visibleSessions, loading, error, refetch, create, update, remove };
 }

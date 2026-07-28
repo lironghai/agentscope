@@ -1,6 +1,12 @@
 import { client } from './client';
 import type { ChatRequest } from './types';
 
+function skillHubHeaders(): Record<string, string> | undefined {
+	const token = localStorage.getItem('skillhub_token')?.trim();
+	if (!token) return undefined;
+	return { 'X-SkillHub-Token': token };
+}
+
 /**
  * Chat API — fire-and-forget trigger for chat runs.
  *
@@ -20,6 +26,10 @@ export const chatApi = {
 	 * @param body - The chat request payload.
 	 * @returns A confirmation object ``{ status, session_id }``.
 	 */
-	trigger: (body: ChatRequest) =>
-		client.post<{ status: string; session_id: string }>('/chat/', body),
+	trigger: (body: ChatRequest, options?: { signal?: AbortSignal; silent?: boolean }) =>
+		client.post<{ status: string; session_id: string }>('/chat/', body, undefined, {
+			headers: skillHubHeaders(),
+			signal: options?.signal,
+			silent: options?.silent,
+		}),
 };

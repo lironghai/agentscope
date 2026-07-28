@@ -34,6 +34,51 @@ from ..access import ResourceKind
 from ._access import ResourceAccessService
 
 
+_TOOL_NAME_ALIASES = {
+    "bash": "Bash",
+    "shell": "Bash",
+    "edit": "Edit",
+    "glob": "Glob",
+    "grep": "Grep",
+    "read": "Read",
+    "read_file": "Read",
+    "write": "Write",
+    "write_file": "Write",
+}
+
+
+def _normalize_tool_name(name: str) -> str:
+    """Normalize user-facing tool names to runtime tool names."""
+    stripped = name.strip()
+    return _TOOL_NAME_ALIASES.get(stripped.lower(), stripped)
+
+
+def _filter_tools_for_agent_config(
+    tools: list,
+    agent_record: AgentRecord,
+) -> list:
+    """Filter exposed tools using Agent-level allow/deny configuration."""
+    allow = {
+        _normalize_tool_name(name)
+        for name in agent_record.data.tool_config.allow
+    }
+    deny = {
+        _normalize_tool_name(name)
+        for name in agent_record.data.tool_config.deny
+    }
+    if not allow and not deny:
+        return tools
+    filtered = []
+    for tool in tools:
+        name = _normalize_tool_name(str(getattr(tool, "name", "")))
+        if name in deny:
+            continue
+        if allow and name not in allow:
+            continue
+        filtered.append(tool)
+    return filtered
+
+
 async def get_toolkit(
     *,
     storage: StorageBase,
@@ -242,6 +287,13 @@ time or interval"
     # Tools from middleware
     for mw in middlewares:
         tools.extend(await mw.list_tools())
+
+    tools = _filter_tools_for_agent_config(tools, agent_record)
+    for group in tool_groups:
+        group.tools = _filter_tools_for_agent_config(
+            list(group.tools),
+            agent_record,
+        )
 
     return Toolkit(
         tools=tools,

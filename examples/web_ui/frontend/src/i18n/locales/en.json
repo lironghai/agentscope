@@ -19,6 +19,7 @@
 		"interrupted": "Interrupted",
 		"knowledge": "Knowledge Bases",
 		"loading": "Loading...",
+		"mcp": "MCP",
 		"model": "Model",
 		"name": "Name",
 		"no": "No",
@@ -33,6 +34,7 @@
 		"schedule": "Schedule",
 		"selectAgent": "Select an agent",
 		"settings": "Settings",
+		"skill": "Skill",
 		"switchToZh": "切换为中文",
 		"switchToEn": "Switch to English",
 		"success": "Success",
@@ -191,7 +193,24 @@
 				"label": "Invite description",
 				"placeholder": "Briefly describe this agent's expertise; required when invitable is on."
 			}
+		},
+		"share-config": {
+			"legend": "Share Config",
+			"description": "Controls whether this agent is visible to other users.",
+			"shared": {
+				"label": "Shared"
+			}
 		}
+	},
+	"agent-bindings": {
+		"legend": "Skill and MCP",
+		"description": "Choose global SkillHub resources for this agent.",
+		"skills": "Skills",
+		"mcps": "MCP servers",
+		"emptySkills": "No SkillHub skills available.",
+		"emptyMcps": "No SkillHub MCP servers available.",
+		"loadError": "Could not load SkillHub resources.",
+		"refresh": "Refresh SkillHub resources"
 	},
 	"dialog-agent-edit": {
 		"title": "Edit agent",
@@ -360,6 +379,32 @@
 			"emptyDescription": "No chunks scored above the threshold for this query."
 		}
 	},
+	"globalCatalog": {
+		"search": "Search",
+		"total": "{{count}} results",
+		"shown": "Showing {{shown}} of {{total}} results",
+		"loadMore": "Load more",
+		"loadingMore": "Loading more...",
+		"allLoaded": "All results loaded",
+		"error": "Could not load SkillHub catalog.",
+		"errorTitle": "SkillHub unavailable",
+		"skills": {
+			"title": "Skill",
+			"subtitle": "Browse SkillHub skills available to AgentScope.",
+			"searchPlaceholder": "Search skills",
+			"emptyTitle": "No skills",
+			"emptyDescription": "No SkillHub skills matched the current search."
+		},
+		"mcps": {
+			"title": "MCP",
+			"subtitle": "Browse SkillHub MCP servers available to AgentScope.",
+			"searchPlaceholder": "Search MCP servers",
+			"catalogTab": "Catalog",
+			"internalTab": "Internal",
+			"emptyTitle": "No MCP servers",
+			"emptyDescription": "No SkillHub MCP servers matched the current search."
+		}
+	},
 	"llm-select": {
 		"placeholder": "Select a model",
 		"fallbackPlaceholder": "Fallback model",
@@ -416,9 +461,12 @@
 	},
 	"dialog-skill-add": {
 		"title": "Add skill",
-		"description": "Enter the path to a skill directory to add it to the workspace.",
+		"description": "Enter a skill directory path, or upload a zip package containing SKILL.md.",
 		"pathLabel": "Skill path",
-		"pathPlaceholder": "/path/to/skill"
+		"pathPlaceholder": "/path/to/skill",
+		"fileLabel": "Upload skill package",
+		"fileDescription": "Supports .zip files with one SKILL.md entry point plus scripts, references, templates, and other resource directories.",
+		"uploadUnavailable": "Skill upload is not available in this environment."
 	},
 	"schedule": {
 		"calendar": "Calendar",
@@ -489,6 +537,9 @@
 		"serverUrlPlaceholder": "https://...",
 		"username": "Username",
 		"usernamePlaceholder": "Your username",
+		"skillhubToken": "SkillHub token",
+		"skillhubTokenPlaceholder": "Optional personal SkillHub token",
+		"skillhubTokenDescription": "Used only for SkillHub Skill/MCP catalog requests. Leave empty to use the server fallback token.",
 		"submit": "Get Started",
 		"hint": "This is a frontend-only application, and all data are served from the Server URL above. The username is used solely for server-side authentication."
 	},
@@ -543,7 +594,9 @@
 			"add": "Add MCP",
 			"tools": "{{count}} tools",
 			"emptyTitle": "No MCP servers",
-			"emptyDescription": "Add an MCP server to equip the workspace with tools."
+			"emptyDescription": "Add an MCP server to equip the workspace with tools.",
+			"configuredBadge": "Agent config",
+			"unknownConfiguredMcp": "Unnamed MCP"
 		},
 		"skill": {
 			"title": "Skills",
@@ -551,7 +604,9 @@
 			"searchPlaceholder": "Search skills in the workspace",
 			"add": "Add Skill",
 			"emptyTitle": "No skills",
-			"emptyDescription": "Add a skill to equip the workspace."
+			"emptyDescription": "Add a skill to equip the workspace.",
+			"configuredBadge": "Agent config",
+			"unknownConfiguredSkill": "Unnamed skill"
 		},
 		"knowledge": {
 			"title": "Knowledge Bases",

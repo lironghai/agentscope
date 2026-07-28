@@ -2,13 +2,16 @@
 """Agent router — CRUD endpoints for agent configurations."""
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import ValidationError
 
 from ...agent import ContextConfig, ReActConfig
+from ..._logging import logger
 from ..._utils._common import _flatten_json_schema
 from ..access import ResourceKind
 from ..deps import (
+    get_agent_binding_resolver,
+    get_agent_workspace_service,
     get_current_user_id,
     get_resource_access_service,
     get_session_service,
@@ -17,12 +20,20 @@ from ..deps import (
 from ._schema import (
     AgentSchemaResponse,
     AgentSchemaV2Response,
+    AgentListData,
+    AgentListView,
     ListAgentsResponse,
     CreateAgentRequest,
     CreateAgentResponse,
     UpdateAgentRequest,
 )
-from .._service import AgentView, ResourceAccessService, SessionService
+from .._service import (
+    AgentBindingResolver,
+    AgentWorkspaceService,
+    AgentView,
+    ResourceAccessService,
+    SessionService,
+)
 from ..storage import StorageBase, AgentData, AgentRecord
 
 agent_router = APIRouter(
@@ -30,6 +41,31 @@ agent_router = APIRouter(
     tags=["agent"],
     responses={404: {"description": "Not found"}},
 )
+
+def _agent_list_view(entry: AgentView) -> AgentListView:
+    """Project a full agent view to list display fields."""
+    return AgentListView(
+        id=entry.id,
+        created_at=entry.created_at,
+        updated_at=entry.updated_at,
+        user_id=entry.user_id,
+        source=entry.source,
+        editable=entry.editable,
+        data=AgentListData(
+            id=entry.data.id,
+            name=entry.data.name,
+            invite_config=entry.data.invite_config,
+            share_config=entry.data.share_config,
+        ),
+    )
+
+
+def _skillhub_token_value(raw: str | None) -> str | None:
+    """Normalize the optional SkillHub token header."""
+    if not isinstance(raw, str):
+        return None
+    token = raw.strip()
+    return token or None
 
 
 @agent_router.get(
@@ -159,7 +195,8 @@ async def list_agents(
             All visible agent records paired with per-viewer editability.
     """
     entries = await access.list_resource(user_id, ResourceKind.AGENT)
-    return ListAgentsResponse(agents=entries, total=len(entries))
+    agents = [_agent_list_view(entry) for entry in entries]
+    return ListAgentsResponse(agents=agents, total=len(agents))
 
 
 @agent_router.post(
@@ -170,8 +207,13 @@ async def list_agents(
 )
 async def create_agent(
     body: CreateAgentRequest,
+    x_skillhub_token: str | None = Header(default=None),
     user_id: str = Depends(get_current_user_id),
     storage: StorageBase = Depends(get_storage),
+    agent_workspace_service: AgentWorkspaceService = Depends(
+        get_agent_workspace_service,
+    ),
+    binding_resolver: AgentBindingResolver = Depends(get_agent_binding_resolver),
 ) -> CreateAgentResponse:
     """Create and persist a new agent configuration.
 
@@ -182,6 +224,10 @@ async def create_agent(
             Injected authenticated user ID.
         storage (`StorageBase`):
             Injected storage backend.
+        agent_workspace_service (`AgentWorkspaceService`):
+            Injected service used to prepare the Agent workspace.
+        binding_resolver (`AgentBindingResolver`):
+            Injected resolver that materialises Agent Skill/MCP bindings.
 
     Returns:
         `CreateAgentResponse`:
@@ -203,6 +249,10 @@ async def create_agent(
             react_config=body.react_config,
             invite_config=body.invite_config,
             share_config=body.share_config,
+            share_grants=body.share_grants,
+            tool_config=body.tool_config,
+            skill_bindings=body.skill_bindings,
+            mcp_bindings=body.mcp_bindings,
         )
     except ValidationError as exc:
         raise HTTPException(
@@ -210,8 +260,72 @@ async def create_agent(
             detail=exc.errors(),
         ) from exc
     record = AgentRecord(user_id=user_id, data=data)
+    try:
+        workspace = await agent_workspace_service.prepare_agent_workspace(
+            user_id=user_id,
+            agent_record=record,
+            sync_tools_config=False,
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Agent workspace prepare failed: {exc}",
+        ) from exc
+    if record.data.skill_bindings or record.data.mcp_bindings:
+        try:
+            result = await binding_resolver.materialize_agent_bindings(
+                user_id=user_id,
+                agent_record=record,
+                workspace=workspace,
+                skillhub_token=_skillhub_token_value(x_skillhub_token),
+            )
+            if result.errors:
+                logger.warning(
+                    "Agent binding materialize for agent %s completed "
+                    "with errors: %s",
+                    record.id,
+                    result.errors,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail={
+                        "message": "Agent binding materialize failed.",
+                        "errors": result.errors,
+                    },
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning(
+                "Agent binding materialize failed for agent %s: %s",
+                record.id,
+                exc,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Agent binding materialize failed: {exc}",
+            ) from exc
+    await agent_workspace_service.write_tools_config(workspace, record)
     agent_id = await storage.upsert_agent(user_id, record)
     return CreateAgentResponse(agent_id=agent_id)
+
+
+@agent_router.get(
+    "/{agent_id}",
+    response_model=AgentView,
+    summary="Get an agent",
+)
+async def get_agent(
+    agent_id: str,
+    user_id: str = Depends(get_current_user_id),
+    access: ResourceAccessService = Depends(get_resource_access_service),
+) -> AgentView:
+    """Return one visible agent with full editable configuration."""
+    return await access.get_resource(
+        user_id,
+        ResourceKind.AGENT,
+        agent_id,
+    )
 
 
 @agent_router.patch(
@@ -222,9 +336,14 @@ async def create_agent(
 async def update_agent(
     agent_id: str,
     body: UpdateAgentRequest,
+    x_skillhub_token: str | None = Header(default=None),
     user_id: str = Depends(get_current_user_id),
     storage: StorageBase = Depends(get_storage),
     access: ResourceAccessService = Depends(get_resource_access_service),
+    agent_workspace_service: AgentWorkspaceService = Depends(
+        get_agent_workspace_service,
+    ),
+    binding_resolver: AgentBindingResolver = Depends(get_agent_binding_resolver),
 ) -> AgentView:
     """Partially update an existing agent configuration.
 
@@ -237,6 +356,10 @@ async def update_agent(
         user_id (`str`): Injected authenticated user ID.
         storage (`StorageBase`): Injected storage backend.
         access (`ResourceAccessService`): Injected access service.
+        agent_workspace_service (`AgentWorkspaceService`):
+            Injected service used to sync the Agent workspace.
+        binding_resolver (`AgentBindingResolver`):
+            Injected resolver that reconciles Agent Skill/MCP bindings.
 
     Returns:
         `AgentView`: The full agent record after the update.
@@ -269,6 +392,63 @@ async def update_agent(
     updated_agent = existing.model_copy(
         update={"data": updated_data, "updated_at": datetime.now()},
     )
+    if (
+        "skill_bindings" in body.model_fields_set
+        or "mcp_bindings" in body.model_fields_set
+        or "tool_config" in body.model_fields_set
+    ):
+        try:
+            workspace = await agent_workspace_service.prepare_agent_workspace(
+                user_id=owner_id,
+                agent_record=updated_agent,
+                sync_tools_config=False,
+            )
+            if (
+                "skill_bindings" in body.model_fields_set
+                or "mcp_bindings" in body.model_fields_set
+            ):
+                result = await binding_resolver.reconcile_agent_bindings(
+                    user_id=owner_id,
+                    before_agent_record=existing,
+                    after_agent_record=updated_agent,
+                    workspace=workspace,
+                    skillhub_token=_skillhub_token_value(x_skillhub_token),
+                )
+                if result.errors:
+                    logger.warning(
+                        "Agent binding reconcile for agent %s completed "
+                        "with errors: %s",
+                        agent_id,
+                        result.errors,
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail={
+                            "message": "Agent binding reconcile failed.",
+                            "errors": result.errors,
+                        },
+                    )
+        except HTTPException:
+            raise
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning(
+                "Agent binding reconcile failed for agent %s: %s",
+                agent_id,
+                exc,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Agent binding reconcile failed: {exc}",
+            ) from exc
+    if (
+        "skill_bindings" in body.model_fields_set
+        or "mcp_bindings" in body.model_fields_set
+        or "tool_config" in body.model_fields_set
+    ):
+        await agent_workspace_service.write_tools_config(
+            workspace,
+            updated_agent,
+        )
     await storage.upsert_agent(owner_id, updated_agent)
     # Only reachable via ``resolve_for_edit``, so the caller has edit
     # permission by construction.

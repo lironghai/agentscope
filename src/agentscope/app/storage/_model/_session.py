@@ -124,6 +124,14 @@ class SessionConfig(BaseModel):
     ``list_mcps``, and team tools; also the cache key for
     :meth:`WorkspaceManagerBase.get_workspace`."""
 
+    workspace_owner_id: str | None = None
+    """Owner user id for the workspace binding.
+
+    ``None`` preserves legacy behavior where the session owner also owns
+    the workspace. Shared Agent sessions set this to the Agent owner so
+    user-scoped workspace managers reopen the materialized Agent workspace.
+    """
+
     name: str = Field(
         default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         description="Display name for the session.",

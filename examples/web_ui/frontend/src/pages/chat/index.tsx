@@ -12,7 +12,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { ChatViewport } from './ChatViewport';
-import type { SessionRecord } from '@/api';
+import { agentApi } from '@/api';
+import type { AgentView, SessionRecord } from '@/api';
 import { AgentDialog } from '@/components/dialog/AgentDialog';
 import { DeleteDialog } from '@/components/dialog/DeleteDialog';
 import { EditAgentDialog } from '@/components/dialog/EditAgentDialog';
@@ -105,10 +106,36 @@ const ChatPageInner = () => {
 	const [renameSession, setRenameSession] = useState<SessionRecord | null>(null);
 	const [deleteSessionOpen, setDeleteSessionOpen] = useState(false);
 	const [sessionToDelete, setSessionToDelete] = useState<SessionRecord | null>(null);
+	const [selectedAgentDetail, setSelectedAgentDetail] = useState<AgentView | null>(null);
+	const [workspaceRefreshVersion, setWorkspaceRefreshVersion] = useState(0);
 
 	const selectedAgent = agents.find((a) => a.id === urlAgentId) ?? null;
 	const currentView = sessions.find((v) => v.session.id === urlSessionId) ?? null;
 	const hasScheduleSessions = sessions.some((v) => v.session.source === 'schedule');
+
+	useEffect(() => {
+		setWorkspaceRefreshVersion(0);
+	}, [urlAgentId]);
+
+	useEffect(() => {
+		if (!urlAgentId) {
+			setSelectedAgentDetail(null);
+			return;
+		}
+		let cancelled = false;
+		setSelectedAgentDetail(null);
+		agentApi
+			.get(urlAgentId, { silent: true })
+			.then((detail) => {
+				if (!cancelled) setSelectedAgentDetail(detail);
+			})
+			.catch(() => {
+				if (!cancelled) setSelectedAgentDetail(null);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [urlAgentId]);
 
 	// "Inner focus" — when the URL carries a third `:memberId` segment
 	// the user is drilling into a team member's chat. The main sidebar
@@ -125,6 +152,8 @@ const ChatPageInner = () => {
 		focusedMember && focusedMember.session_id
 			? focusedMember.session_id
 			: (urlSessionId ?? null);
+	const effectiveAgentBindings =
+		effectiveAgentId && effectiveAgentId === urlAgentId ? selectedAgentDetail : null;
 
 	// Redirect: URL is missing an agent → pick the first one and rewrite
 	// the URL in-place (replace so we don't pollute history).
@@ -365,6 +394,9 @@ const ChatPageInner = () => {
 				<ChatViewport
 					agentId={effectiveAgentId}
 					sessionId={effectiveSessionId}
+					agentMcpBindings={effectiveAgentBindings?.data.mcp_bindings ?? []}
+					agentSkillBindings={effectiveAgentBindings?.data.skill_bindings ?? []}
+					workspaceRefreshVersion={workspaceRefreshVersion}
 					onTeamUpdated={refetchSessions}
 				/>
 			</div>
@@ -374,7 +406,11 @@ const ChatPageInner = () => {
 						open={editOpen}
 						onOpenChange={setEditOpen}
 						agent={selectedAgent}
-						onUpdated={refetchAgents}
+						onUpdated={(updated) => {
+							setSelectedAgentDetail(updated);
+							setWorkspaceRefreshVersion((version) => version + 1);
+							void refetchAgents();
+						}}
 					/>
 					<DeleteDialog
 						open={deleteOpen}

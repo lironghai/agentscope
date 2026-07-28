@@ -15,6 +15,7 @@ from agentscope.app.access import (
 from agentscope.app.storage import (
     AgentData,
     AgentRecord,
+    CredentialRecord,
     ShareConfig,
     StorageBase,
 )
@@ -49,6 +50,68 @@ class _FakeStorage:
                 data=_make_agent_data("Alice own", shared=False),
             ),
         }
+        self.credentials: dict[tuple[str, str], CredentialRecord] = {
+            ("bob", "bob-shared-credential"): CredentialRecord(
+                id="bob-shared-credential",
+                user_id="bob",
+                data={
+                    "type": "openai_credential",
+                    "name": "Bob shared credential",
+                    "api_key": "secret",
+                    "shared": True,
+                },
+            ),
+            ("bob", "bob-private-credential"): CredentialRecord(
+                id="bob-private-credential",
+                user_id="bob",
+                data={
+                    "type": "openai_credential",
+                    "name": "Bob private credential",
+                    "api_key": "secret",
+                    "shared": False,
+                },
+            ),
+            ("alice", "alice-credential"): CredentialRecord(
+                id="alice-credential",
+                user_id="alice",
+                data={
+                    "type": "openai_credential",
+                    "name": "Alice own credential",
+                    "api_key": "secret",
+                    "shared": False,
+                },
+            ),
+        }
+
+    async def list_credentials(
+        self,
+        user_id: str,
+    ) -> list[CredentialRecord]:
+        """List credentials owned by ``user_id``."""
+        return [
+            record
+            for (owner_id, _), record in self.credentials.items()
+            if owner_id == user_id
+        ]
+
+    async def list_shared_credentials(
+        self,
+        viewer_id: str,
+    ) -> list[CredentialRecord]:
+        """List shared credentials visible to ``viewer_id``."""
+        return [
+            record
+            for (owner_id, _), record in self.credentials.items()
+            if owner_id != viewer_id and record.data.get("shared") is True
+        ]
+
+    async def get_credential(
+        self,
+        user_id: str,
+        credential_id: str,
+    ) -> CredentialRecord | None:
+        """Get one credential by owner and id."""
+        return self.credentials.get((user_id, credential_id))
 
     async def list_agents(self, user_id: str) -> list[AgentRecord]:
         """List agents owned by ``user_id``."""
@@ -75,6 +138,20 @@ class _FakeStorage:
     ) -> AgentRecord | None:
         """Get one agent by owner and id."""
         return self.agents.get((user_id, agent_id))
+
+
+class _NoSharedAgentDetailStorage(_FakeStorage):
+    """Storage double that rejects detail reads for shared agent listing."""
+
+    async def get_agent(
+        self,
+        user_id: str,
+        agent_id: str,
+    ) -> AgentRecord | None:
+        """Reject shared detail reads; own detail reads still work."""
+        if (user_id, agent_id) == ("bob", "bob-shared"):
+            raise AssertionError("shared agent list fetched full detail")
+        return await super().get_agent(user_id, agent_id)
 
 
 def _make_agent_data(name: str, shared: bool) -> AgentData:
@@ -161,3 +238,67 @@ class SharedAgentPolicyTest(IsolatedAsyncioTestCase):
                 "bob-shared",
             )
         self.assertEqual(ctx.exception.status_code, 403)
+
+    async def test_access_service_reuses_shared_agent_list_records(self) -> None:
+        """Agent list should not re-fetch shared agent full detail."""
+        storage = cast(StorageBase, _NoSharedAgentDetailStorage())
+        service = ResourceAccessService(
+            storage=storage,
+            policy=SharedAgentPolicy(),
+        )
+
+        views = await service.list_resource("alice", ResourceKind.AGENT)
+
+        self.assertEqual(
+            {view.id for view in views},
+            {"alice-agent", "bob-shared"},
+        )
+
+    async def test_non_owner_gets_only_shared_credentials_as_read_refs(
+        self,
+    ) -> None:
+        """Non-owners should see only explicitly shared credentials."""
+        policy = SharedAgentPolicy()
+        storage = cast(StorageBase, _FakeStorage())
+
+        refs = await policy.list_accessible(
+            "alice",
+            ResourceKind.CREDENTIAL,
+            storage,
+        )
+
+        self.assertEqual(len(refs), 1)
+        self.assertEqual(refs[0].kind, ResourceKind.CREDENTIAL)
+        self.assertEqual(refs[0].owner_id, "bob")
+        self.assertEqual(refs[0].resource_id, "bob-shared-credential")
+        self.assertEqual(refs[0].permission, ResourcePermission.READ)
+
+    async def test_access_service_lists_own_and_shared_credentials(
+        self,
+    ) -> None:
+        """Access service should mask cross-owner shared credentials."""
+        storage = cast(StorageBase, _FakeStorage())
+        service = ResourceAccessService(
+            storage=storage,
+            policy=SharedAgentPolicy(),
+        )
+
+        views = await service.list_resource("alice", ResourceKind.CREDENTIAL)
+        by_id = {view.id: view for view in views}
+
+        self.assertEqual(set(by_id), {"alice-credential", "bob-shared-credential"})
+        self.assertTrue(by_id["alice-credential"].editable)
+        self.assertFalse(by_id["bob-shared-credential"].editable)
+        self.assertEqual(
+            by_id["bob-shared-credential"].data,
+            {
+                "type": "openai_credential",
+                "name": "Bob shared credential",
+            },
+        )
+
+        raw = await service.resolve_credential(
+            "alice",
+            "bob-shared-credential",
+        )
+        self.assertEqual(raw.data["api_key"], "secret")

@@ -10,6 +10,7 @@ from ._service._long_term_memory_browser import LongTermMemoryBrowser
 from .workspace_manager import WorkspaceManagerBase
 from ._router import (
     agent_router,
+    agent_tools_router,
     chat_router,
     credential_router,
     knowledge_base_router,
@@ -17,11 +18,16 @@ from ._router import (
     tts_model_router,
     schedule_router,
     session_router,
+    skillhub_catalog_router,
+    subagent_router,
     workspace_router,
 )
+from ._service._agent_binding import AgentBindingResolver
+from ._service._skillhub_catalog import SkillHubCatalogClient
 from ._types import AgentMiddlewareFactory, AgentToolFactory, SubAgentTemplate
 from .message_bus import MessageBus
 from .storage import StorageBase
+from ._service._agent_workspace import AgentWorkspaceService
 from ..agent import Agent
 from ..credential import CredentialFactory, CredentialBase
 from ..rag import (
@@ -58,7 +64,11 @@ def create_app(
     custom_subagent_templates: list[SubAgentTemplate] | None = None,
     custom_agent_cls: Type[Agent] | None = None,
     resource_access_policy: ResourceAccessPolicyBase | None = None,
+    admin_user_ids: set[str] | list[str] | tuple[str, ...] | None = None,
     long_term_memory_browser: LongTermMemoryBrowser | None = None,
+    skillhub_catalog_client: SkillHubCatalogClient | None = None,
+    agent_binding_resolver: AgentBindingResolver | None = None,
+    agent_workspace_service: AgentWorkspaceService | None = None,
     title: str = "AgentScope",
     version: str = __version__,
 ) -> FastAPI:
@@ -188,11 +198,28 @@ def create_app(
             user. When ``None`` (default), a
             :class:`DenyAllResourceAccessPolicy` is installed which
             preserves the historical owner-isolated behavior.
+        admin_user_ids (`set[str] | list[str] | tuple[str, ...] | None`, \
+         optional):
+            User IDs with application administrator privileges. Built-in
+            routers use this for sensitive global operations such as
+            creating shared credentials. Defaults to an empty set.
         long_term_memory_browser (`LongTermMemoryBrowser | None`, optional):
             Browser service for long-term memory files. Session ownership is
             still checked by the router before files are listed or edited.
             ``None`` disables memory browser endpoints with a controlled
             503 response.
+        skillhub_catalog_client (`SkillHubCatalogClient | None`, optional):
+            Optional backend-only SkillHub catalog client used by the global
+            Skill/MCP catalog router. ``None`` disables those endpoints with
+            a controlled 503 response.
+        agent_binding_resolver (`AgentBindingResolver | None`, optional):
+            Optional service that materialises Agent-level Skill/MCP bindings
+            into a newly created session workspace. Defaults to a resolver
+            backed by ``skillhub_catalog_client``.
+        agent_workspace_service (`AgentWorkspaceService | None`, optional):
+            Optional service that resolves and scaffolds deterministic
+            Agent-level workspaces. Defaults to one backed by
+            ``workspace_manager``.
         title (`str`, defaults to ``"AgentScope"``):
             OpenAPI title shown in the docs UI.
         version (`str`, defaults to the package version):
@@ -220,7 +247,19 @@ def create_app(
     app.state.resource_access_policy = (
         resource_access_policy or DenyAllResourceAccessPolicy()
     )
+    app.state.admin_user_ids = set(admin_user_ids or [])
     app.state.long_term_memory_browser = long_term_memory_browser
+    app.state.skillhub_catalog_client = skillhub_catalog_client
+    app.state.agent_binding_resolver = (
+        agent_binding_resolver
+        if agent_binding_resolver is not None
+        else AgentBindingResolver(skillhub_client=skillhub_catalog_client)
+    )
+    app.state.agent_workspace_service = (
+        agent_workspace_service
+        if agent_workspace_service is not None
+        else AgentWorkspaceService(workspace_manager)
+    )
 
     # Parser / chunker / blob-store defaults only make sense when the
     # KB feature is actually enabled.  When ``knowledge_base_manager`` is
@@ -264,11 +303,14 @@ def create_app(
     # Built-in routers
     for router in (
         agent_router,
+        agent_tools_router,
         chat_router,
         credential_router,
         knowledge_base_router,
         schedule_router,
         session_router,
+        skillhub_catalog_router,
+        subagent_router,
         workspace_router,
         model_router,
         tts_model_router,

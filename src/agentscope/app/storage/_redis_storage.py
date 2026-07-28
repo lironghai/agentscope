@@ -22,6 +22,7 @@ from ._model import (
     SessionSource,
     TeamRecord,
     ExecutionTraceRecord,
+    effective_agent_share_tier,
 )
 from ._utils import _dump_with_secrets
 from ...credential import CredentialBase
@@ -66,6 +67,7 @@ class RedisStorage(StorageBase):
 
         # Index keys (Redis Sets — store all IDs for a given scope)
         credential_index: str = "agentscope:user:{user_id}:credentials"
+        shared_credential_index: str = "agentscope:shared_credentials"
         agent_index: str = "agentscope:user:{user_id}:agents"
         shared_agent_index: str = "agentscope:shared_agents"
         session_index: str = (
@@ -340,6 +342,7 @@ class RedisStorage(StorageBase):
         )
         await self._set_with_ttl(key, record.model_dump_json())
         await self._client.sadd(index_key, record.id)
+        await self._sync_shared_credential_index(user_id, record)
         return record.id
 
     async def list_credentials(self, user_id: str) -> list[CredentialRecord]:
@@ -371,6 +374,38 @@ class RedisStorage(StorageBase):
             )
             if raw:
                 records.append(CredentialRecord.model_validate_json(raw))
+        return records
+
+    async def list_shared_credentials(
+        self,
+        viewer_id: str,
+    ) -> list[CredentialRecord]:
+        """Return shared credentials visible to ``viewer_id``."""
+        members = await self._client.smembers(
+            self.key_config.shared_credential_index,
+        )
+        records: list[CredentialRecord] = []
+        for member in members:
+            try:
+                payload = json.loads(member)
+            except json.JSONDecodeError:
+                continue
+            owner_id = payload.get("user_id")
+            credential_id = payload.get("credential_id")
+            if not owner_id or not credential_id or owner_id == viewer_id:
+                continue
+            raw = await self._client.get(
+                self._key(
+                    self.key_config.credential,
+                    user_id=owner_id,
+                    credential_id=credential_id,
+                ),
+            )
+            if not raw:
+                continue
+            record = CredentialRecord.model_validate_json(raw)
+            if record.data.get("shared") is True:
+                records.append(record)
         return records
 
     async def get_credential(
@@ -413,7 +448,31 @@ class RedisStorage(StorageBase):
         )
         deleted = await self._client.delete(key)
         await self._client.srem(index_key, credential_id)
+        await self._client.srem(
+            self.key_config.shared_credential_index,
+            json.dumps({"user_id": user_id, "credential_id": credential_id}),
+        )
         return deleted > 0
+
+    async def _sync_shared_credential_index(
+        self,
+        user_id: str,
+        credential_record: CredentialRecord,
+    ) -> None:
+        """Keep the global shared-credential index aligned with storage."""
+        member = json.dumps(
+            {
+                "user_id": user_id,
+                "credential_id": credential_record.id,
+            },
+        )
+        if credential_record.data.get("shared") is True:
+            await self._client.sadd(
+                self.key_config.shared_credential_index,
+                member,
+            )
+            return
+        await self._client.srem(self.key_config.shared_credential_index, member)
 
     async def upsert_agent(
         self,
@@ -506,7 +565,11 @@ class RedisStorage(StorageBase):
             if not raw:
                 continue
             record = AgentRecord.model_validate_json(raw)
-            if record.source == "user" and record.data.share_config.shared:
+            if (
+                record.source == "user"
+                and effective_agent_share_tier(record.data, viewer_id)
+                is not None
+            ):
                 records.append(record)
         return records
 
@@ -615,7 +678,13 @@ class RedisStorage(StorageBase):
     ) -> None:
         """Keep the global shared-agent index aligned with storage."""
         member = json.dumps({"user_id": user_id, "agent_id": agent_record.id})
-        if agent_record.source == "user" and agent_record.data.share_config.shared:
+        if (
+            agent_record.source == "user"
+            and (
+                agent_record.data.share_config.shared
+                or agent_record.data.share_grants
+            )
+        ):
             await self._client.sadd(self.key_config.shared_agent_index, member)
             return
         await self._client.srem(self.key_config.shared_agent_index, member)

@@ -2,7 +2,20 @@ import { CircleAlert, Loader2, Save } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { AgentView, ContextConfig, InviteConfig, ReActConfig } from '@/api';
+import { agentApi } from '@/api';
+import type {
+	AgentMcpBinding,
+	AgentListView,
+	AgentShareGrant,
+	AgentSkillBinding,
+	AgentView,
+	AgentToolConfig,
+	ContextConfig,
+	InviteConfig,
+	ReActConfig,
+	ShareConfig,
+} from '@/api';
+import { AgentCatalogBindings } from '@/components/form/AgentCatalogBindings';
 import {
 	AgentFormFields,
 	defaultAgentFormValues,
@@ -27,8 +40,8 @@ import { formatApiErrorForAlert } from '@/lib/api-error';
 interface Props {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	agent: AgentView;
-	onUpdated?: () => void;
+	agent: AgentListView;
+	onUpdated?: (agent: AgentView) => void;
 }
 
 export function EditAgentDialog({ open, onOpenChange, agent, onUpdated }: Props) {
@@ -36,21 +49,48 @@ export function EditAgentDialog({ open, onOpenChange, agent, onUpdated }: Props)
 	const { t } = useTranslation();
 	const { schema } = useAgentSchema();
 	const [submitting, setSubmitting] = useState(false);
+	const [detail, setDetail] = useState<AgentView | null>(null);
 	const [values, setValues] = useState<AgentFormValues | null>(null);
+	const [shareGrants, setShareGrants] = useState<AgentShareGrant[]>([]);
+	const [skillBindings, setSkillBindings] = useState<AgentSkillBinding[]>([]);
+	const [mcpBindings, setMcpBindings] = useState<AgentMcpBinding[]>([]);
 	const [errorMsg, setErrorMsg] = useState('');
 
 	useEffect(() => {
-		if (!open || !schema) {
-			if (!open) {
-				setValues(null);
-				setErrorMsg('');
-			}
+		if (!open) {
+			setDetail(null);
+			setValues(null);
+			setShareGrants([]);
+			setSkillBindings([]);
+			setMcpBindings([]);
+			setErrorMsg('');
+			return;
+		}
+		let cancelled = false;
+		setDetail(null);
+		setValues(null);
+		setErrorMsg('');
+		agentApi
+			.get(agent.id)
+			.then((res) => {
+				if (!cancelled) setDetail(res);
+			})
+			.catch((e) => {
+				if (!cancelled) setErrorMsg(formatApiErrorForAlert(e));
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [open, agent.id]);
+
+	useEffect(() => {
+		if (!open || !schema || !detail) {
 			return;
 		}
 		// Start from schema defaults, then overlay the existing agent's data so
 		// any unset fields fall back to defaults rather than empty.
 		const base = defaultAgentFormValues(schema);
-		const d = agent.data;
+		const d = detail.data;
 		setValues({
 			identity: {
 				...base.identity,
@@ -60,9 +100,14 @@ export function EditAgentDialog({ open, onOpenChange, agent, onUpdated }: Props)
 			context_config: { ...base.context_config, ...(d.context_config ?? {}) },
 			react_config: { ...base.react_config, ...(d.react_config ?? {}) },
 			invite_config: { ...base.invite_config, ...(d.invite_config ?? {}) },
+			share_config: { ...base.share_config, ...(d.share_config ?? {}) },
+			tool_config: { ...base.tool_config, ...(d.tool_config ?? {}) },
 		});
+		setShareGrants(d.share_grants ?? []);
+		setSkillBindings(d.skill_bindings ?? []);
+		setMcpBindings(d.mcp_bindings ?? []);
 		setErrorMsg('');
-	}, [open, schema, agent]);
+	}, [open, schema, detail]);
 
 	const handleChange = (section: AgentSection, key: string, value: SchemaFormValue) => {
 		setErrorMsg('');
@@ -78,7 +123,7 @@ export function EditAgentDialog({ open, onOpenChange, agent, onUpdated }: Props)
 		setErrorMsg('');
 		setSubmitting(true);
 		try {
-			await update(
+			const updated = await update(
 				agent.id,
 				{
 					name,
@@ -86,11 +131,16 @@ export function EditAgentDialog({ open, onOpenChange, agent, onUpdated }: Props)
 					context_config: values.context_config as unknown as ContextConfig,
 					react_config: values.react_config as unknown as ReActConfig,
 					invite_config: values.invite_config as unknown as InviteConfig,
+					share_config: values.share_config as unknown as ShareConfig,
+					share_grants: shareGrants,
+					tool_config: values.tool_config as unknown as AgentToolConfig,
+					skill_bindings: skillBindings,
+					mcp_bindings: mcpBindings,
 				},
 				{ silent: true },
 			);
 			onOpenChange(false);
-			onUpdated?.();
+			onUpdated?.(updated);
 		} catch (e) {
 			setErrorMsg(formatApiErrorForAlert(e));
 		} finally {
@@ -102,7 +152,7 @@ export function EditAgentDialog({ open, onOpenChange, agent, onUpdated }: Props)
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="!w-[500px] !max-w-[500px]">
+			<DialogContent className="!w-[640px] !max-w-[640px]">
 				<DialogHeader>
 					<DialogTitle>{t('dialog-agent-edit.title')}</DialogTitle>
 					<DialogDescription className="sr-only">
@@ -111,7 +161,15 @@ export function EditAgentDialog({ open, onOpenChange, agent, onUpdated }: Props)
 				</DialogHeader>
 				<div className="no-scrollbar -mx-4 max-h-[75vh] overflow-y-auto px-4">
 					{schema && values ? (
-						<AgentFormFields schema={schema} values={values} onChange={handleChange} />
+						<>
+							<AgentFormFields schema={schema} values={values} onChange={handleChange} />
+							<AgentCatalogBindings
+								skillBindings={skillBindings}
+								mcpBindings={mcpBindings}
+								onSkillBindingsChange={setSkillBindings}
+								onMcpBindingsChange={setMcpBindings}
+							/>
+						</>
 					) : (
 						<p className="text-muted-foreground text-sm">{t('common.loading')}</p>
 					)}

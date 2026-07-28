@@ -12,8 +12,10 @@ import { useTranslation } from '@/i18n/useI18n';
 import { ChatPage } from '@/pages/chat';
 import { CredentialPage } from '@/pages/credential';
 import { KnowledgePage } from '@/pages/knowledge';
+import { McpsPage } from '@/pages/mcps';
 import { SchedulePage } from '@/pages/schedule';
 import { SetupPage } from '@/pages/setup';
+import { SkillsPage } from '@/pages/skills';
 
 function SetupPageRoute() {
 	const navigate = useNavigate();
@@ -48,6 +50,8 @@ const router = createBrowserRouter([
 					{ path: '/credential', element: <CredentialPage /> },
 					{ path: '/knowledge', element: <KnowledgePage /> },
 					{ path: '/knowledge/:kbId', element: <KnowledgePage /> },
+					{ path: '/skills', element: <SkillsPage /> },
+					{ path: '/mcps', element: <McpsPage /> },
 				],
 			},
 		],

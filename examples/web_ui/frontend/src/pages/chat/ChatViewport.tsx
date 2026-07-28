@@ -11,7 +11,13 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import type { ChatModelConfig, SessionKnowledgeConfig, TTSModelConfig } from '@/api';
+import type {
+	AgentMcpBinding,
+	AgentSkillBinding,
+	ChatModelConfig,
+	SessionKnowledgeConfig,
+	TTSModelConfig,
+} from '@/api';
 import { sessionApi } from '@/api';
 import MCPSvg from '@/assets/images/mcp.svg?react';
 import { ChatContent } from '@/components/chat/ChatContent.tsx';
@@ -63,6 +69,12 @@ interface ChatViewportProps {
 	 * workspace drive every control rendered here.
 	 */
 	sessionId: string | null;
+	/** Agent-level MCPs selected in the Agent configuration. */
+	agentMcpBindings?: AgentMcpBinding[];
+	/** Agent-level skills selected in the Agent configuration. */
+	agentSkillBindings?: AgentSkillBinding[];
+	/** Incremented by the outer page when Agent workspace resources changed. */
+	workspaceRefreshVersion?: number;
 	/**
 	 * Optional hook invoked when a team membership change arrives on
 	 * this viewport's SSE stream. The outer page owns the session list
@@ -126,7 +138,14 @@ function closePanelInLayout(layout: PanelKey[][], key: PanelKey): PanelKey[][] {
  *   session is selected yet.
  * @returns The right-side main JSX of the chat page.
  */
-export function ChatViewport({ agentId, sessionId, onTeamUpdated }: ChatViewportProps) {
+export function ChatViewport({
+	agentId,
+	sessionId,
+	agentMcpBindings = [],
+	agentSkillBindings = [],
+	workspaceRefreshVersion = 0,
+	onTeamUpdated,
+}: ChatViewportProps) {
 	const { t } = useTranslation();
 	const { sessions, refetch: refetchSessions } = useSessions(agentId);
 	const { groups } = useAvailableModels();
@@ -176,13 +195,16 @@ export function ChatViewport({ agentId, sessionId, onTeamUpdated }: ChatViewport
 	const {
 		mcps,
 		loading: mcpsLoading,
+		refetch: refetchMcps,
 		addMcps,
 		removeMcp,
 		skills,
 		skillsLoading,
+		refetchSkills,
 		addSkill,
+		uploadSkill,
 		removeSkill,
-	} = useWorkspace(agentId, sessionId);
+	} = useWorkspace(agentId, null);
 	const { knowledgeBases, loading: knowledgeBasesLoading } = useKnowledgeBases();
 	const { schema: kbMiddlewareSchema } = useKnowledgeBaseMiddlewareSchema();
 
@@ -204,6 +226,12 @@ export function ChatViewport({ agentId, sessionId, onTeamUpdated }: ChatViewport
 		setDiagnosticsReplyId(replyId);
 		setDiagnosticsOpen(true);
 	}, []);
+
+	useEffect(() => {
+		if (workspaceRefreshVersion === 0) return;
+		void refetchMcps();
+		void refetchSkills();
+	}, [workspaceRefreshVersion, refetchMcps, refetchSkills]);
 
 	const isPanelOpen = useCallback(
 		(key: PanelKey) => panelLayout.some((column) => column.includes(key)),
@@ -248,6 +276,7 @@ export function ChatViewport({ agentId, sessionId, onTeamUpdated }: ChatViewport
 				content: (
 					<McpPanel
 						mcps={mcps}
+						configuredMcps={agentMcpBindings}
 						loading={mcpsLoading}
 						onAdd={addMcps}
 						onRemove={removeMcp}
@@ -260,8 +289,10 @@ export function ChatViewport({ agentId, sessionId, onTeamUpdated }: ChatViewport
 				content: (
 					<SkillPanel
 						skills={skills}
+						configuredSkills={agentSkillBindings}
 						loading={skillsLoading}
 						onAdd={addSkill}
+						onUpload={uploadSkill}
 						onRemove={removeSkill}
 					/>
 				),
@@ -323,10 +354,13 @@ export function ChatViewport({ agentId, sessionId, onTeamUpdated }: ChatViewport
 			mcpsLoading,
 			addMcps,
 			removeMcp,
+			agentMcpBindings,
 			skills,
 			skillsLoading,
 			addSkill,
+			uploadSkill,
 			removeSkill,
+			agentSkillBindings,
 			permissionContext,
 			knowledgeBases,
 			knowledgeBasesLoading,

@@ -23,13 +23,15 @@ interface RequestOptions {
 	method?: string;
 	body?: unknown;
 	params?: Record<string, string>;
+	headers?: Record<string, string>;
+	signal?: AbortSignal;
 	/** When true, suppresses the automatic error toast. Useful when the caller shows its own inline error UI. */
 	silent?: boolean;
 }
 
-function buildHeaders(hasBody: boolean): Record<string, string> {
+function buildHeaders(hasBody: boolean, isFormData = false): Record<string, string> {
 	const headers: Record<string, string> = { 'X-User-ID': getUserId() };
-	if (hasBody) headers['Content-Type'] = 'application/json';
+	if (hasBody && !isFormData) headers['Content-Type'] = 'application/json';
 	return headers;
 }
 
@@ -47,16 +49,30 @@ async function extractErrorDetail(res: Response): Promise<string> {
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-	const { method = 'GET', body, params, silent = false } = options;
+	const {
+		method = 'GET',
+		body,
+		params,
+		headers: extraHeaders,
+		signal,
+		silent = false,
+	} = options;
 	const url = new URL(path, getBaseUrl());
 	if (params) {
 		Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
 	}
 
+	const isFormData = body instanceof FormData;
 	const res = await fetch(url.toString(), {
 		method,
-		headers: buildHeaders(body !== undefined),
-		body: body ? JSON.stringify(body) : undefined,
+		headers: { ...buildHeaders(body !== undefined, isFormData), ...extraHeaders },
+		body:
+			body === undefined
+				? undefined
+				: isFormData
+					? body
+					: JSON.stringify(body),
+		signal,
 	});
 
 	if (!res.ok) {
@@ -98,26 +114,58 @@ async function streamRequest(
 }
 
 export const client = {
-	get: <T>(path: string, params?: Record<string, string>, options?: { silent?: boolean }) =>
-		request<T>(path, { method: 'GET', params, silent: options?.silent }),
+	get: <T>(
+		path: string,
+		params?: Record<string, string>,
+		options?: { headers?: Record<string, string>; signal?: AbortSignal; silent?: boolean },
+	) =>
+		request<T>(path, {
+			method: 'GET',
+			params,
+			headers: options?.headers,
+			signal: options?.signal,
+			silent: options?.silent,
+		}),
 	post: <T>(
 		path: string,
 		body?: unknown,
 		params?: Record<string, string>,
-		options?: { silent?: boolean },
-	) => request<T>(path, { method: 'POST', body, params, silent: options?.silent }),
+		options?: { headers?: Record<string, string>; signal?: AbortSignal; silent?: boolean },
+	) =>
+		request<T>(path, {
+			method: 'POST',
+			body,
+			params,
+			headers: options?.headers,
+			signal: options?.signal,
+			silent: options?.silent,
+		}),
 	put: <T>(
 		path: string,
 		body?: unknown,
 		params?: Record<string, string>,
-		options?: { silent?: boolean },
-	) => request<T>(path, { method: 'PUT', body, params, silent: options?.silent }),
+		options?: { headers?: Record<string, string>; silent?: boolean },
+	) =>
+		request<T>(path, {
+			method: 'PUT',
+			body,
+			params,
+			headers: options?.headers,
+			silent: options?.silent,
+		}),
 	patch: <T>(
 		path: string,
 		body?: unknown,
 		params?: Record<string, string>,
-		options?: { silent?: boolean },
-	) => request<T>(path, { method: 'PATCH', body, params, silent: options?.silent }),
+		options?: { headers?: Record<string, string>; silent?: boolean },
+	) =>
+		request<T>(path, {
+			method: 'PATCH',
+			body,
+			params,
+			headers: options?.headers,
+			silent: options?.silent,
+		}),
 	delete: <T = void>(path: string, params?: Record<string, string>) =>
 		request<T>(path, { method: 'DELETE', params }),
 	stream: (path: string, options?: RequestOptions & { signal?: AbortSignal }) =>

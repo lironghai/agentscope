@@ -1,11 +1,19 @@
 # -*- coding: utf-8 -*-
 """Request / response schemas for the agent router."""
 import warnings
+from datetime import datetime
 
 from pydantic import BaseModel, Field
 
 from ....agent import ContextConfig, ReActConfig
-from ...storage import InviteConfig, ShareConfig
+from ...storage import (
+    AgentMcpBinding,
+    AgentShareGrant,
+    AgentSkillBinding,
+    AgentToolConfig,
+    InviteConfig,
+    ShareConfig,
+)
 from ..._service import AgentView
 
 
@@ -36,6 +44,22 @@ class CreateAgentRequest(BaseModel):
     share_config: ShareConfig = Field(
         default_factory=ShareConfig,
         description="Sharing settings for this agent.",
+    )
+    share_grants: list[AgentShareGrant] = Field(
+        default_factory=list,
+        description="Explicit cross-owner Agent access grants.",
+    )
+    tool_config: AgentToolConfig = Field(
+        default_factory=AgentToolConfig,
+        description="Built-in tool exposure configuration.",
+    )
+    skill_bindings: list[AgentSkillBinding] = Field(
+        default_factory=list,
+        description="SkillHub or custom skills selected for this agent.",
+    )
+    mcp_bindings: list[AgentMcpBinding] = Field(
+        default_factory=list,
+        description="SkillHub or custom MCP servers selected for this agent.",
     )
 
 
@@ -76,12 +100,57 @@ class UpdateAgentRequest(BaseModel):
         default=None,
         description="New sharing settings. Omit to leave sharing unchanged.",
     )
+    share_grants: list[AgentShareGrant] | None = Field(
+        default=None,
+        description="Replacement explicit Agent access grant list.",
+    )
+    tool_config: AgentToolConfig | None = Field(
+        default=None,
+        description="New built-in tool exposure configuration.",
+    )
+    skill_bindings: list[AgentSkillBinding] | None = Field(
+        default=None,
+        description="Replacement Skill/MCP skill selection list.",
+    )
+    mcp_bindings: list[AgentMcpBinding] | None = Field(
+        default=None,
+        description="Replacement MCP server selection list.",
+    )
+
+
+class AgentListData(BaseModel):
+    """Lightweight agent data needed by list views."""
+
+    id: str = Field(description="Agent data identifier.")
+    name: str = Field(description="Display name of the agent.")
+    invite_config: InviteConfig = Field(
+        default_factory=InviteConfig,
+        description="Invite-pool display settings for this agent.",
+    )
+    share_config: ShareConfig = Field(
+        default_factory=ShareConfig,
+        description="Sharing display settings for this agent.",
+    )
+
+
+class AgentListView(BaseModel):
+    """Viewer-relative lightweight agent list item."""
+
+    id: str = Field(description="Server-assigned agent identifier.")
+    created_at: datetime = Field(description="Creation timestamp.")
+    updated_at: datetime = Field(description="Last update timestamp.")
+    user_id: str = Field(description="Owner user id.")
+    source: str = Field(description="Agent source, such as user or team.")
+    data: AgentListData = Field(description="Display fields for this agent.")
+    editable: bool = Field(
+        description="Whether the current viewer may PATCH/DELETE this agent.",
+    )
 
 
 class ListAgentsResponse(BaseModel):
     """Response body for listing agents."""
 
-    agents: list[AgentView] = Field(description="Agent records.")
+    agents: list[AgentListView] = Field(description="Agent list records.")
     total: int = Field(description="Total number of agents.")
 
 

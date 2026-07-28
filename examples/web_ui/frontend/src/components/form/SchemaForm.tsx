@@ -13,7 +13,15 @@ import { Textarea } from '@/components/ui/textarea';
 
 const DEFAULT_SKIP_FIELDS = new Set(['id', 'type']);
 
-export type SchemaFormValue = string | number | boolean | null | undefined;
+export type SchemaFormValue =
+	| string
+	| number
+	| boolean
+	| null
+	| undefined
+	| string[]
+	| number[]
+	| Record<string, unknown>;
 
 interface Props {
 	schema: JSONSchema;
@@ -92,6 +100,8 @@ export function SchemaForm({
 				const isPassword = prop.format === 'password';
 				const isTextarea = prop.format === 'textarea';
 				const isNumber = type === 'number' || type === 'integer';
+				const isArray = type === 'array';
+				const isObject = type === 'object';
 				const enumOpts = enumValues(prop);
 
 				const label = labelFor?.(key, prop) ?? prop.title ?? key.replace(/_/g, ' ');
@@ -190,6 +200,71 @@ export function SchemaForm({
 									const parsed =
 										type === 'integer' ? parseInt(raw, 10) : parseFloat(raw);
 									onChange(key, Number.isNaN(parsed) ? raw : parsed);
+								}}
+								placeholder={placeholder}
+							/>
+							{description && <FieldDescription>{description}</FieldDescription>}
+						</Field>
+					);
+				}
+
+				if (isArray) {
+					const currentText = Array.isArray(current) ? current.join('\n') : '';
+					return (
+						<Field key={key}>
+							<FieldLabel htmlFor={fieldId}>
+								{label}
+								{isRequired && <span className="text-destructive ml-0.5">*</span>}
+							</FieldLabel>
+							<Textarea
+								id={fieldId}
+								rows={3}
+								value={currentText}
+								onChange={(e) =>
+									onChange(
+										key,
+										e.target.value
+											.split(/\r?\n|,/)
+											.map((item) => item.trim())
+											.filter(Boolean),
+									)
+								}
+								placeholder={placeholder}
+							/>
+							{description && <FieldDescription>{description}</FieldDescription>}
+						</Field>
+					);
+				}
+
+				if (isObject) {
+					const currentText =
+						typeof current === 'string'
+							? current
+							: current && typeof current === 'object' && !Array.isArray(current)
+							? JSON.stringify(current, null, 2)
+							: '';
+					return (
+						<Field key={key}>
+							<FieldLabel htmlFor={fieldId}>
+								{label}
+								{isRequired && <span className="text-destructive ml-0.5">*</span>}
+							</FieldLabel>
+							<Textarea
+								id={fieldId}
+								rows={4}
+								value={currentText}
+								onChange={(e) => {
+									const raw = e.target.value.trim();
+									if (!raw) {
+										onChange(key, {});
+										return;
+									}
+									try {
+										const parsed = JSON.parse(raw) as Record<string, unknown>;
+										onChange(key, parsed);
+									} catch {
+										onChange(key, raw);
+									}
 								}}
 								placeholder={placeholder}
 							/>

@@ -110,7 +110,11 @@ class _FakeWorkspace:
 class _FakeWorkspaceManager:
     """Workspace manager stub."""
 
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, ...]] = []
+
     async def get_workspace(self, *_args: object, **_kwargs: object) -> object:
+        self.calls.append(_args)
         return _FakeWorkspace()
 
 
@@ -761,11 +765,12 @@ class TestChatServiceExecutionDiagnostics(IsolatedAsyncioTestCase):
         agent_cls: type[_FakeAgent],
         *,
         extra_agent_middlewares=None,
+        workspace_manager=None,
     ) -> ChatService:
         """Create ChatService with fake dependencies."""
         return ChatService(
             storage=self.storage,
-            workspace_manager=_FakeWorkspaceManager(),
+            workspace_manager=workspace_manager or _FakeWorkspaceManager(),
             scheduler_manager=object(),
             background_task_manager=object(),
             message_bus=InMemoryMessageBus(),
@@ -818,6 +823,63 @@ class TestChatServiceExecutionDiagnostics(IsolatedAsyncioTestCase):
         )
         self.assertEqual(trace.tool_calls[0]["input_preview"], '{"query":"abc"}')
         self.assertEqual(trace.tool_calls[0]["result_preview"], "result text")
+
+    async def test_chat_service_does_not_materialize_agent_bindings(self) -> None:
+        """Chat runs should consume an already-prepared Agent workspace."""
+        service = self.make_service(_FakeAgent)
+        with (
+            patch("agentscope.app._service._chat.get_model", AsyncMock()),
+            patch("agentscope.app._service._chat.get_toolkit", AsyncMock()),
+        ):
+            await service.run(
+                self.user_id,
+                self.session.id,
+                self.agent_id,
+                Msg(
+                    name="user",
+                    role="user",
+                    content=[TextBlock(text="hello")],
+                    id="input-1",
+                ),
+            )
+        self.assertFalse(hasattr(service, "_agent_binding_resolver"))
+
+    async def test_chat_service_uses_session_workspace_owner(self) -> None:
+        """Shared Agent runs should reopen the Agent owner's workspace."""
+        config = make_session_config()
+        config.workspace_id = "owner-workspace"
+        config.workspace_owner_id = "owner-1"
+        self.session = await self.storage.upsert_session(
+            self.user_id,
+            self.agent_id,
+            config,
+            session_id="session-1",
+        )
+        workspace_manager = _FakeWorkspaceManager()
+        service = self.make_service(
+            _FakeAgent,
+            workspace_manager=workspace_manager,
+        )
+        with (
+            patch("agentscope.app._service._chat.get_model", AsyncMock()),
+            patch("agentscope.app._service._chat.get_toolkit", AsyncMock()),
+        ):
+            await service.run(
+                self.user_id,
+                self.session.id,
+                self.agent_id,
+                Msg(
+                    name="user",
+                    role="user",
+                    content=[TextBlock(text="hello")],
+                    id="input-1",
+                ),
+            )
+
+        self.assertEqual(
+            workspace_manager.calls[0],
+            ("owner-1", self.agent_id, self.session.id, "owner-workspace"),
+        )
 
     async def test_chat_service_finalizes_trace_on_run_error(self) -> None:
         """A failed run still persists a non-running error trace."""

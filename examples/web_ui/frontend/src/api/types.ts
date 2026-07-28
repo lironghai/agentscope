@@ -6,6 +6,37 @@ export interface RecordBase {
 	updated_at: string;
 }
 
+// ─── Global SkillHub Catalog ─────────────────────────────────────────────
+
+export type SkillHubCatalogItem = Record<string, unknown>;
+
+export interface SkillHubCatalogResponse {
+	items: SkillHubCatalogItem[];
+	total: number;
+	page: number;
+	size: number;
+	facets: Record<string, string[]>;
+}
+
+export interface SkillHubSkillQuery {
+	q?: string;
+	namespace?: string;
+	label?: string;
+	sort?: string;
+	page?: number;
+	size?: number;
+}
+
+export interface SkillHubMcpQuery {
+	search?: string;
+	category?: string;
+	auth_type?: string;
+	provider?: string;
+	tags?: string[];
+	page?: number;
+	size?: number;
+}
+
 export interface ChatModelConfig {
 	type: string;
 	credential_id: string;
@@ -38,7 +69,56 @@ export interface InviteConfig {
 	invite_description?: string | null;
 }
 
+export interface ShareConfig {
+	shared?: boolean;
+}
+
+export type AgentShareTier = 'read' | 'clone' | 'run' | 'edit';
+export type AgentShareGranteeType = 'user' | 'workspace';
+
+export interface AgentShareGrant {
+	grantee_type: AgentShareGranteeType;
+	grantee_id: string;
+	tier?: AgentShareTier;
+	created_at?: string;
+	created_by?: string | null;
+}
+
+export interface AgentSkillBinding {
+	binding_id?: string;
+	source?: 'skillhub' | 'custom';
+	skillhub_skill_id?: string | null;
+	namespace?: string;
+	slug?: string;
+	version?: string | null;
+	display_name?: string | null;
+	description?: string | null;
+	enabled?: boolean;
+	config_json?: Record<string, unknown>;
+	snapshot_json?: Record<string, unknown>;
+}
+
+export interface AgentMcpBinding {
+	binding_id?: string;
+	source?: 'skillhub' | 'custom';
+	skillhub_server_id?: string | null;
+	name?: string;
+	provider?: string | null;
+	auth_type?: string | null;
+	transport?: string | null;
+	endpoint_url?: string | null;
+	enabled?: boolean;
+	config_json?: Record<string, unknown>;
+	snapshot_json?: Record<string, unknown>;
+}
+
 // ─── Agent ────────────────────────────────────────────────────────────────────
+
+export interface AgentToolConfig {
+	allow?: string[];
+	deny?: string[];
+	defaults?: Record<string, unknown>;
+}
 
 export interface AgentData {
 	id: string;
@@ -47,15 +127,35 @@ export interface AgentData {
 	context_config: ContextConfig;
 	react_config: ReActConfig;
 	invite_config: InviteConfig;
+	share_config?: ShareConfig;
+	share_grants?: AgentShareGrant[];
+	tool_config?: AgentToolConfig;
+	skill_bindings?: AgentSkillBinding[];
+	mcp_bindings?: AgentMcpBinding[];
 }
 
 export interface AgentView extends RecordBase {
 	user_id: string;
+	source: string;
 	data: AgentData;
 	/**
 	 * Whether the current viewer may PATCH/DELETE this agent. `false`
 	 * for agents shared to the viewer with read-only permission.
 	 */
+	editable: boolean;
+}
+
+export interface AgentListData {
+	id: string;
+	name: string;
+	invite_config?: InviteConfig;
+	share_config?: ShareConfig;
+}
+
+export interface AgentListView extends RecordBase {
+	user_id: string;
+	source: string;
+	data: AgentListData;
 	editable: boolean;
 }
 
@@ -65,6 +165,11 @@ export interface CreateAgentRequest {
 	context_config?: ContextConfig;
 	react_config?: ReActConfig;
 	invite_config?: InviteConfig;
+	share_config?: ShareConfig;
+	share_grants?: AgentShareGrant[];
+	tool_config?: AgentToolConfig;
+	skill_bindings?: AgentSkillBinding[];
+	mcp_bindings?: AgentMcpBinding[];
 }
 
 export interface CreateAgentResponse {
@@ -77,10 +182,27 @@ export interface UpdateAgentRequest {
 	context_config?: ContextConfig;
 	react_config?: ReActConfig;
 	invite_config?: InviteConfig;
+	share_config?: ShareConfig;
+	share_grants?: AgentShareGrant[];
+	tool_config?: AgentToolConfig;
+	skill_bindings?: AgentSkillBinding[];
+	mcp_bindings?: AgentMcpBinding[];
+}
+
+export interface AgentToolsConfigResponse {
+	agent_id: string;
+	tool_config: AgentToolConfig;
+	mcp_bindings: AgentMcpBinding[];
+	tools_json: Record<string, unknown>;
+}
+
+export interface UpdateAgentToolsRequest {
+	tool_config?: AgentToolConfig;
+	mcp_bindings?: AgentMcpBinding[];
 }
 
 export interface AgentListResponse {
-	agents: AgentView[];
+	agents: AgentListView[];
 	total: number;
 }
 

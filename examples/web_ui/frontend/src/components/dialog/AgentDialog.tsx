@@ -2,7 +2,16 @@ import { CircleAlert, Loader2, PlusCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { ContextConfig, InviteConfig, ReActConfig } from '@/api';
+import type {
+	AgentMcpBinding,
+	AgentSkillBinding,
+	ContextConfig,
+	InviteConfig,
+	ReActConfig,
+	ShareConfig,
+	AgentToolConfig,
+} from '@/api';
+import { AgentCatalogBindings } from '@/components/form/AgentCatalogBindings';
 import {
 	AgentFormFields,
 	defaultAgentFormValues,
@@ -37,6 +46,8 @@ export function AgentDialog({ onCreated, triggerId }: Props) {
 	const [open, setOpen] = useState(false);
 	const [submitting, setSubmitting] = useState(false);
 	const [values, setValues] = useState<AgentFormValues | null>(null);
+	const [skillBindings, setSkillBindings] = useState<AgentSkillBinding[]>([]);
+	const [mcpBindings, setMcpBindings] = useState<AgentMcpBinding[]>([]);
 	const [errorMsg, setErrorMsg] = useState('');
 
 	useEffect(() => {
@@ -45,6 +56,8 @@ export function AgentDialog({ onCreated, triggerId }: Props) {
 		}
 		if (!open) {
 			setValues(null);
+			setSkillBindings([]);
+			setMcpBindings([]);
 			setErrorMsg('');
 		}
 	}, [open, schema, values]);
@@ -70,6 +83,10 @@ export function AgentDialog({ onCreated, triggerId }: Props) {
 					context_config: values.context_config as unknown as ContextConfig,
 					react_config: values.react_config as unknown as ReActConfig,
 					invite_config: values.invite_config as unknown as InviteConfig,
+					share_config: values.share_config as unknown as ShareConfig,
+					tool_config: values.tool_config as unknown as AgentToolConfig,
+					skill_bindings: skillBindings,
+					mcp_bindings: mcpBindings,
 				},
 				{ silent: true },
 			);
@@ -92,7 +109,7 @@ export function AgentDialog({ onCreated, triggerId }: Props) {
 					<span>{t('dialog-agent-create.trigger')}</span>
 				</Button>
 			</DialogTrigger>
-			<DialogContent className="!w-[500px] !max-w-[500px]">
+			<DialogContent className="!w-[640px] !max-w-[640px]">
 				<DialogHeader>
 					<DialogTitle>{t('dialog-agent-create.title')}</DialogTitle>
 					<DialogDescription className="sr-only">
@@ -101,7 +118,15 @@ export function AgentDialog({ onCreated, triggerId }: Props) {
 				</DialogHeader>
 				<div className="no-scrollbar -mx-4 max-h-[75vh] overflow-y-auto px-4">
 					{schema && values ? (
-						<AgentFormFields schema={schema} values={values} onChange={handleChange} />
+						<>
+							<AgentFormFields schema={schema} values={values} onChange={handleChange} />
+							<AgentCatalogBindings
+								skillBindings={skillBindings}
+								mcpBindings={mcpBindings}
+								onSkillBindingsChange={setSkillBindings}
+								onMcpBindingsChange={setMcpBindings}
+							/>
+						</>
 					) : (
 						<p className="text-muted-foreground text-sm">{t('common.loading')}</p>
 					)}

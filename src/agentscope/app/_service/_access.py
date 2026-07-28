@@ -161,16 +161,30 @@ class ResourceAccessService:
             self._build_view(record, viewer_id, True) for record in own
         ]
         seen = {(record.user_id, record.id) for record in own}
+        refs = await self._list_refs(viewer_id, kind)
+        shared_agents_by_key: dict[tuple[str, str], AgentRecord] = {}
+        if (
+            kind is ResourceKind.AGENT
+            and refs
+            and hasattr(self._storage, "list_shared_agents")
+        ):
+            shared_agents_by_key = {
+                (record.user_id, record.id): record
+                for record in await self._storage.list_shared_agents(viewer_id)
+                if record.source == "user"
+            }
 
-        for ref in await self._list_refs(viewer_id, kind):
+        for ref in refs:
             key = (ref.owner_id, ref.resource_id)
             if key in seen:
                 continue
-            record = await self._get_owned(
-                kind,
-                ref.owner_id,
-                ref.resource_id,
-            )
+            record = shared_agents_by_key.get(key)
+            if record is None:
+                record = await self._get_owned(
+                    kind,
+                    ref.owner_id,
+                    ref.resource_id,
+                )
             if record is None:
                 continue
             # Team workers are not shareable; owner reads still see them
@@ -314,7 +328,12 @@ class ResourceAccessService:
                 ref.owner_id,
                 ref.resource_id,
             )
-            if record is not None and record.source != "team":
+            if (
+                record is not None
+                and record.source != "team"
+                and ref.permission
+                in (ResourcePermission.RUN, ResourcePermission.EDIT)
+            ):
                 return record
         raise self._not_found(ResourceKind.AGENT, agent_id)
 
@@ -429,8 +448,8 @@ class ResourceAccessService:
         """Project a raw storage record onto a viewer-relative view.
 
         Credential ``data`` is masked when the viewer is not the owner
-        so the wire format never leaks the shared secret; other kinds
-        pass through unchanged apart from the added ``editable`` flag.
+        so the wire format never leaks the shared secret. Agent binding
+        config snapshots are similarly hidden from read/run/clone viewers.
         """
         if isinstance(record, CredentialRecord):
             payload = record.model_dump()
@@ -443,8 +462,17 @@ class ResourceAccessService:
             payload["editable"] = editable
             return CredentialView.model_validate(payload)
         if isinstance(record, AgentRecord):
+            payload = record.model_dump()
+            if record.user_id != viewer_id and not editable:
+                payload["data"]["share_grants"] = []
+                for binding in payload["data"].get("skill_bindings", []):
+                    binding["config_json"] = {}
+                    binding["snapshot_json"] = {}
+                for binding in payload["data"].get("mcp_bindings", []):
+                    binding["config_json"] = {}
+                    binding["snapshot_json"] = {}
             return AgentView.model_validate(
-                {**record.model_dump(), "editable": editable},
+                {**payload, "editable": editable},
             )
         return KnowledgeBaseView.model_validate(
             {**record.model_dump(), "editable": editable},

@@ -1,0 +1,265 @@
+import { ChevronDown, Search, Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { FormEvent, UIEvent } from 'react';
+import { useTranslation } from 'react-i18next';
+
+import { globalCatalogApi, type SkillHubCatalogItem } from '@/api';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+	Empty,
+	EmptyDescription,
+	EmptyHeader,
+	EmptyMedia,
+	EmptyTitle,
+} from '@/components/ui/empty';
+import { Input } from '@/components/ui/input';
+import { Spinner } from '@/components/ui/spinner';
+
+const PAGE_SIZE = 24;
+const SCROLL_LOAD_THRESHOLD = 240;
+
+function readString(item: SkillHubCatalogItem, keys: string[], fallback = '') {
+	for (const key of keys) {
+		const value = item[key];
+		if (typeof value === 'string' && value.trim()) return value;
+		if (typeof value === 'number') return String(value);
+	}
+	return fallback;
+}
+
+function SkillCard({ skill }: { skill: SkillHubCatalogItem }) {
+	const name = readString(skill, ['displayName', 'name', 'slug'], 'Unnamed skill');
+	const summary = readString(skill, ['summary', 'description']);
+	const namespace = readString(skill, ['namespace']);
+	const status = readString(skill, ['status', 'visibility']);
+	const version = readString(skill, ['version', 'latestVersion']);
+	const updatedAt = readString(skill, ['updatedAt', 'updated_at']);
+
+	return (
+		<article className="rounded-lg border bg-background p-4">
+			<div className="flex items-start justify-between gap-3">
+				<div className="min-w-0">
+					<h2 className="truncate text-sm font-semibold">{name}</h2>
+					{namespace ? (
+						<p className="mt-1 truncate text-xs text-muted-foreground">@{namespace}</p>
+					) : null}
+				</div>
+				{status ? (
+					<Badge variant="secondary" className="shrink-0">
+						{status}
+					</Badge>
+				) : null}
+			</div>
+			{summary ? (
+				<p className="mt-3 line-clamp-3 text-sm text-muted-foreground">{summary}</p>
+			) : null}
+			<div className="mt-4 flex flex-wrap gap-2 text-xs text-muted-foreground">
+				{version ? <span>{version}</span> : null}
+				{updatedAt ? <span>{updatedAt}</span> : null}
+			</div>
+		</article>
+	);
+}
+
+function getSkillKey(skill: SkillHubCatalogItem, fallback: string | number) {
+	const id = readString(skill, ['id']);
+	const namespace = readString(skill, ['namespace']);
+	const slug = readString(skill, ['slug', 'name']);
+	if (id) return id;
+	if (namespace && slug) return `${namespace}/${slug}`;
+	return slug || String(fallback);
+}
+
+function appendUniqueSkills(
+	current: SkillHubCatalogItem[],
+	incoming: SkillHubCatalogItem[],
+) {
+	const seen = new Set(current.map((item, index) => getSkillKey(item, index)));
+	const next = [...current];
+	incoming.forEach((item, index) => {
+		const key = getSkillKey(item, `${current.length}-${index}`);
+		if (seen.has(key)) return;
+		seen.add(key);
+		next.push(item);
+	});
+	return next;
+}
+
+export function SkillsPage() {
+	const { t } = useTranslation();
+	const [query, setQuery] = useState('');
+	const [submittedQuery, setSubmittedQuery] = useState('');
+	const [items, setItems] = useState<SkillHubCatalogItem[]>([]);
+	const [total, setTotal] = useState(0);
+	const [page, setPage] = useState(0);
+	const [loading, setLoading] = useState(false);
+	const [loadingMore, setLoadingMore] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const appendRequestInFlight = useRef(false);
+
+	const loadPage = useCallback(async (nextPage: number, append = false) => {
+		if (append && appendRequestInFlight.current) return;
+		if (append) appendRequestInFlight.current = true;
+		if (append) {
+			setLoadingMore(true);
+		} else {
+			setLoading(true);
+		}
+		setError(null);
+		try {
+			const response = await globalCatalogApi.listSkills({
+				q: submittedQuery,
+				sort: 'newest',
+				page: nextPage,
+				size: PAGE_SIZE,
+			});
+			setItems((current) =>
+				append ? appendUniqueSkills(current, response.items) : response.items,
+			);
+			setTotal(response.total);
+			setPage(response.page);
+		} catch (e) {
+			if (!append) {
+				setItems([]);
+				setTotal(0);
+				setPage(0);
+			}
+			setError(e instanceof Error ? e.message : t('globalCatalog.error'));
+		} finally {
+			if (append) {
+				setLoadingMore(false);
+				appendRequestInFlight.current = false;
+			} else {
+				setLoading(false);
+			}
+		}
+	}, [submittedQuery, t]);
+
+	useEffect(() => {
+		loadPage(0);
+	}, [loadPage]);
+
+	const hasMore = items.length < total;
+
+	const loadMore = useCallback(() => {
+		if (loading || loadingMore || !hasMore) return;
+		void loadPage(page + 1, true);
+	}, [hasMore, loadPage, loading, loadingMore, page]);
+
+	const handleScroll = useCallback((event: UIEvent<HTMLElement>) => {
+		const target = event.currentTarget;
+		const remaining =
+			target.scrollHeight - target.scrollTop - target.clientHeight;
+		if (remaining <= SCROLL_LOAD_THRESHOLD) {
+			loadMore();
+		}
+	}, [loadMore]);
+
+	const handleSubmit = (event: FormEvent) => {
+		event.preventDefault();
+		const nextQuery = query.trim();
+		if (nextQuery === submittedQuery) {
+			void loadPage(0);
+			return;
+		}
+		setSubmittedQuery(nextQuery);
+	};
+
+	return (
+		<main className="flex size-full flex-col overflow-hidden">
+			<header className="border-b px-6 py-5">
+				<div className="flex flex-col gap-4">
+					<div>
+						<h1 className="text-lg font-semibold">{t('globalCatalog.skills.title')}</h1>
+						<p className="mt-1 text-sm text-muted-foreground">
+							{t('globalCatalog.skills.subtitle')}
+						</p>
+					</div>
+					<form className="flex max-w-xl gap-2" onSubmit={handleSubmit}>
+						<Input
+							value={query}
+							onChange={(event) => setQuery(event.target.value)}
+							placeholder={t('globalCatalog.skills.searchPlaceholder')}
+						/>
+						<Button type="submit" variant="outline" disabled={loading}>
+							<Search className="size-4" />
+							{t('globalCatalog.search')}
+						</Button>
+					</form>
+				</div>
+			</header>
+			<section
+				className="min-h-0 flex-1 overflow-y-auto p-6"
+				onScroll={handleScroll}
+			>
+				<div className="mb-4 flex items-center justify-between text-sm text-muted-foreground">
+					<span>
+						{t('globalCatalog.shown', {
+							shown: items.length,
+							total,
+						})}
+					</span>
+					{loading ? <Spinner /> : null}
+				</div>
+				{error ? (
+					<Empty className="border-none">
+						<EmptyHeader>
+							<EmptyMedia variant="icon">
+								<Sparkles />
+							</EmptyMedia>
+							<EmptyTitle>{t('globalCatalog.errorTitle')}</EmptyTitle>
+							<EmptyDescription>{error}</EmptyDescription>
+						</EmptyHeader>
+					</Empty>
+				) : items.length === 0 && !loading ? (
+					<Empty className="border-none">
+						<EmptyHeader>
+							<EmptyMedia variant="icon">
+								<Sparkles />
+							</EmptyMedia>
+							<EmptyTitle>{t('globalCatalog.skills.emptyTitle')}</EmptyTitle>
+							<EmptyDescription>
+								{t('globalCatalog.skills.emptyDescription')}
+							</EmptyDescription>
+						</EmptyHeader>
+					</Empty>
+				) : (
+					<>
+						<div className="grid grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-3">
+							{items.map((skill, index) => (
+								<SkillCard
+									key={getSkillKey(skill, index)}
+									skill={skill}
+								/>
+							))}
+						</div>
+						<div className="flex min-h-16 items-center justify-center py-5">
+							{hasMore ? (
+								<Button
+									type="button"
+									variant="outline"
+									onClick={loadMore}
+									disabled={loadingMore}
+								>
+									{loadingMore ? (
+										<Spinner />
+									) : (
+										<ChevronDown className="size-4" />
+									)}
+									{loadingMore
+										? t('globalCatalog.loadingMore')
+										: t('globalCatalog.loadMore')}
+								</Button>
+							) : total > 0 ? (
+								<span className="text-sm text-muted-foreground">
+									{t('globalCatalog.allLoaded')}
+								</span>
+							) : null}
+						</div>
+					</>
+				)}
+			</section>
+		</main>
+	);
+}

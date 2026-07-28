@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/select';
 import { useCredentials } from '@/hooks/useCredentials';
 import { useTranslation } from '@/i18n/useI18n.ts';
+import { isCurrentUserAdmin } from '@/lib/admin';
 
 interface Props {
 	open: boolean;
@@ -31,9 +32,12 @@ interface Props {
 	defaultType?: string;
 }
 
+const NON_ADMIN_SKIP_FIELDS = new Set(['id', 'type', 'shared']);
+
 export function CreateCredentialDialog({ open, onOpenChange, onCreated, defaultType }: Props) {
 	const { create } = useCredentials();
 	const { t } = useTranslation();
+	const canShareCredentials = isCurrentUserAdmin();
 	const [schemas, setSchemas] = useState<CredentialSchema[]>([]);
 	const [loadingSchemas, setLoadingSchemas] = useState(false);
 	const [selectedType, setSelectedType] = useState('');
@@ -74,6 +78,7 @@ export function CreateCredentialDialog({ open, onOpenChange, onCreated, defaultT
 				const val = values[key];
 				if (val !== undefined && val !== '') data[key] = val;
 			}
+			if (!canShareCredentials) data.shared = false;
 			await create({ data });
 			onOpenChange(false);
 			onCreated?.();
@@ -125,6 +130,7 @@ export function CreateCredentialDialog({ open, onOpenChange, onCreated, defaultT
 							schema={selectedSchema}
 							values={values}
 							onChange={(key, val) => setValues((prev) => ({ ...prev, [key]: val }))}
+							skipFields={canShareCredentials ? undefined : NON_ADMIN_SKIP_FIELDS}
 						/>
 					)}
 				</FieldGroup>

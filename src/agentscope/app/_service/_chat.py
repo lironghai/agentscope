@@ -221,7 +221,12 @@ class ChatService:
                   results and ends the reply (Case B, no reasoning).
         """
         try:
-            await self._run_impl(user_id, session_id, agent_id, input_msg)
+            await self._run_impl(
+                user_id,
+                session_id,
+                agent_id,
+                input_msg,
+            )
         except asyncio.CancelledError as e:
             current_task = asyncio.current_task()
             recorder = (
@@ -402,8 +407,11 @@ class ChatService:
                 ),
             )
         async with recorder.stage("workspace resolution"):
+            workspace_owner_id = (
+                session_record.config.workspace_owner_id or user_id
+            )
             workspace = await self._workspace_manager.get_workspace(
-                user_id,
+                workspace_owner_id,
                 agent_id,
                 session_id,
                 session_record.config.workspace_id,

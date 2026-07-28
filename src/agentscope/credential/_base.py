@@ -26,6 +26,14 @@ class CredentialBase(BaseModel):
         description="User-facing display name for this credential.",
     )
 
+    shared: bool = Field(
+        default=False,
+        description=(
+            "Whether this credential is visible to other users as a "
+            "read-only shared credential."
+        ),
+    )
+
     @classmethod
     def get_chat_model_class(cls) -> Type["ChatModelBase"]:
         """Return the :class:`ChatModelBase` subclass that consumes this

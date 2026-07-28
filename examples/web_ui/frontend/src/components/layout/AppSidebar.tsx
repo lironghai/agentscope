@@ -5,12 +5,13 @@ import {
 	KeyRound,
 	Languages,
 	LibraryBig,
+	Plug,
 	Settings,
+	Sparkles,
 } from 'lucide-react';
 import { useOnborda } from 'onborda';
 import { useNavigate, useLocation } from 'react-router-dom';
 
-import AgentScope from '@/assets/images/agentscope.svg?react';
 import { CHAT_TOUR_NAME } from '@/components/tour/chatTourSteps';
 import {
 	Sidebar,
@@ -52,7 +53,11 @@ export function AppSidebar() {
 		<Sidebar collapsible="none" className="w-[calc(var(--sidebar-width-icon)+1px)]! border-r">
 			<SidebarHeader>
 				<div className="flex items-center justify-center h-12 mt-2">
-					<AgentScope className="size-8 items-center justify-center rounded-lg" />
+					<img
+						src="/spring_loading.1bb8bcfc.png"
+						alt="AgentScope"
+						className="size-8 rounded-lg object-contain"
+					/>
 				</div>
 			</SidebarHeader>
 			<SidebarContent>
@@ -106,6 +111,26 @@ export function AppSidebar() {
 									className="px-2"
 								>
 									<LibraryBig />
+								</SidebarMenuButton>
+							</SidebarMenuItem>
+							<SidebarMenuItem>
+								<SidebarMenuButton
+									tooltip={{ children: t('common.skill'), hidden: false }}
+									isActive={location.pathname === '/skills'}
+									onClick={() => navigate('/skills')}
+									className="px-2"
+								>
+									<Sparkles />
+								</SidebarMenuButton>
+							</SidebarMenuItem>
+							<SidebarMenuItem>
+								<SidebarMenuButton
+									tooltip={{ children: t('common.mcp'), hidden: false }}
+									isActive={location.pathname === '/mcps'}
+									onClick={() => navigate('/mcps')}
+									className="px-2"
+								>
+									<Plug />
 								</SidebarMenuButton>
 							</SidebarMenuItem>
 						</SidebarMenu>

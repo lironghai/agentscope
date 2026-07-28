@@ -9,6 +9,8 @@ from ._manager import (
     SchedulerManager,
 )
 from ._service import (
+    AgentBindingResolver,
+    AgentWorkspaceService,
     ChatService,
     KnowledgeBaseService,
     LongTermMemoryBrowser,
@@ -101,6 +103,11 @@ async def get_resource_access_service(
     return request.app.state.resource_access_service
 
 
+async def get_admin_user_ids(request: Request) -> set[str]:
+    """Return user IDs with application administrator privileges."""
+    return getattr(request.app.state, "admin_user_ids", set())
+
+
 async def get_session_service(request: Request) -> SessionService:
     """Return the application-wide session service.
 
@@ -112,6 +119,20 @@ async def get_session_service(request: Request) -> SessionService:
         ``app.state``.
     """
     return request.app.state.session_service
+
+
+async def get_agent_binding_resolver(
+    request: Request,
+) -> AgentBindingResolver:
+    """Return the application-wide Agent binding resolver."""
+    return request.app.state.agent_binding_resolver
+
+
+async def get_agent_workspace_service(
+    request: Request,
+) -> AgentWorkspaceService:
+    """Return the application-wide Agent workspace service."""
+    return request.app.state.agent_workspace_service
 
 
 async def get_long_term_memory_browser(

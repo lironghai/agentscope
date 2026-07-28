@@ -134,6 +134,8 @@ export function useMessages(
 	const msgsRef = useRef<Msg[]>([]);
 	const currentReplyRef = useRef<Msg | null>(null);
 	const abortRef = useRef<AbortController | null>(null);
+	const triggerAbortRef = useRef<AbortController | null>(null);
+	const currentPairRef = useRef({ agentId, sessionId });
 	const rafRef = useRef<number | null>(null);
 	// Timer that reverts ``interrupting`` back to ``idle`` if the
 	// terminating REPLY_END never arrives (dropped SSE frame, etc.).
@@ -152,6 +154,15 @@ export function useMessages(
 	useEffect(() => {
 		optionsRef.current = options;
 	}, [options]);
+	useEffect(() => {
+		currentPairRef.current = { agentId, sessionId };
+	}, [agentId, sessionId]);
+	const isCurrentPair = useCallback(
+		(expectedAgentId: string, expectedSessionId: string) =>
+			currentPairRef.current.agentId === expectedAgentId &&
+			currentPairRef.current.sessionId === expectedSessionId,
+		[],
+	);
 	const scheduleUpdate = useCallback(() => {
 		if (rafRef.current !== null) return;
 		rafRef.current = requestAnimationFrame(() => {
@@ -290,7 +301,12 @@ export function useMessages(
 			// 1. Fetch persisted history
 			setLoading(true);
 			try {
-				const { messages, is_running } = await sessionApi.messages(sessionId, agentId);
+				const { messages, is_running } = await sessionApi.messages(
+					sessionId,
+					agentId,
+					undefined,
+					controller.signal,
+				);
 				if (cancelled) return;
 				msgsRef.current = messages;
 				// If a reply is in flight (running on a worker) OR the
@@ -335,6 +351,8 @@ export function useMessages(
 						const { messages, is_running } = await sessionApi.messages(
 							sessionId,
 							agentId,
+							undefined,
+							controller.signal,
 						);
 						if (!cancelled && !is_running) {
 							applyPersistedMessages(messages, is_running);
@@ -352,6 +370,8 @@ export function useMessages(
 			cancelled = true;
 			controller.abort();
 			abortRef.current = null;
+			triggerAbortRef.current?.abort();
+			triggerAbortRef.current = null;
 			clearInterruptTimer();
 		};
 	}, [
@@ -402,9 +422,15 @@ export function useMessages(
 	const send = useCallback(
 		async (content: ContentBlock[]) => {
 			if (!agentId || !sessionId) return;
+			const requestAgentId = agentId;
+			const requestSessionId = sessionId;
+			triggerAbortRef.current?.abort();
+			const controller = new AbortController();
+			triggerAbortRef.current = controller;
 
 			const userMsg = UserMsg({ name: 'user', content });
 			msgsRef.current = [...msgsRef.current, userMsg];
+			setPhase('streaming');
 			scheduleUpdate();
 
 			try {
@@ -412,12 +438,23 @@ export function useMessages(
 					agent_id: agentId,
 					session_id: sessionId,
 					input: userMsg,
-				});
+				}, { signal: controller.signal, silent: true });
 			} catch (e) {
+				if (
+					controller.signal.aborted ||
+					!isCurrentPair(requestAgentId, requestSessionId)
+				) {
+					return;
+				}
+				setPhase('idle');
 				setError(e as Error);
+			} finally {
+				if (triggerAbortRef.current === controller) {
+					triggerAbortRef.current = null;
+				}
 			}
 		},
-		[agentId, sessionId, scheduleUpdate],
+		[agentId, sessionId, scheduleUpdate, isCurrentPair],
 	);
 
 	/**

@@ -19,7 +19,7 @@ from agentscope.app.storage import (
     TeamRecord,
 )
 from agentscope.credential import OllamaCredential
-from agentscope.app.storage import AgentData, ShareConfig
+from agentscope.app.storage import AgentData, AgentShareGrant, ShareConfig
 from agentscope.agent import ContextConfig, ReActConfig
 from agentscope.message import UserMsg, AssistantMsg, TextBlock
 from agentscope.state import AgentState
@@ -133,6 +133,45 @@ class TestCredential(IsolatedAsyncioTestCase):
         )
         records = await self.storage.list_credentials("user-B")
         self.assertEqual(records, [])
+
+    async def test_shared_credential_index_tracks_shared_credentials(
+        self,
+    ) -> None:
+        """Shared credential index should follow the credential toggle."""
+        private_credential = OllamaCredential(
+            host="http://private-host:11434",
+        )
+        shared_credential = OllamaCredential(
+            host="http://shared-host:11434",
+            shared=True,
+        )
+
+        await self.storage.upsert_credential(self.user_id, private_credential)
+        await self.storage.upsert_credential(self.user_id, shared_credential)
+
+        visible = await self.storage.list_shared_credentials("other-user")
+        visible_ids = {record.id for record in visible}
+        self.assertIn(shared_credential.id, visible_ids)
+        self.assertNotIn(private_credential.id, visible_ids)
+
+        owner_visible = await self.storage.list_shared_credentials(self.user_id)
+        self.assertNotIn(
+            shared_credential.id,
+            {record.id for record in owner_visible},
+        )
+
+        shared_credential.shared = False
+        await self.storage.upsert_credential(self.user_id, shared_credential)
+        visible = await self.storage.list_shared_credentials("other-user")
+        visible_ids = {record.id for record in visible}
+        self.assertNotIn(shared_credential.id, visible_ids)
+
+        await self.storage.delete_credential(self.user_id, shared_credential.id)
+        visible = await self.storage.list_shared_credentials("other-user")
+        self.assertNotIn(
+            shared_credential.id,
+            {record.id for record in visible},
+        )
 
 
 class TestAgent(IsolatedAsyncioTestCase):
@@ -865,6 +904,33 @@ class TestAgentSource(IsolatedAsyncioTestCase):
         await self.storage.delete_agent(self.user_id, shared_agent.id)
         visible = await self.storage.list_shared_agents("other-user")
         self.assertNotIn(shared_agent.id, {record.id for record in visible})
+
+    async def test_shared_agent_index_tracks_explicit_grants(self) -> None:
+        """Shared agent index should follow explicit Agent ACL grants."""
+        granted_agent = make_agent_record(self.user_id)
+        private_agent = make_agent_record(self.user_id)
+        granted_agent.data.share_grants = [
+            AgentShareGrant(
+                grantee_type="user",
+                grantee_id="other-user",
+                tier="run",
+                created_by=self.user_id,
+            ),
+        ]
+
+        await self.storage.upsert_agent(self.user_id, granted_agent)
+        await self.storage.upsert_agent(self.user_id, private_agent)
+
+        visible = await self.storage.list_shared_agents("other-user")
+        visible_ids = {record.id for record in visible}
+        self.assertIn(granted_agent.id, visible_ids)
+        self.assertNotIn(private_agent.id, visible_ids)
+
+        granted_agent.data.share_grants = []
+        await self.storage.upsert_agent(self.user_id, granted_agent)
+
+        visible = await self.storage.list_shared_agents("other-user")
+        self.assertNotIn(granted_agent.id, {record.id for record in visible})
 
     async def test_legacy_record_without_source_deserializes(self) -> None:
         """JSON written before the ``source`` field was added still loads

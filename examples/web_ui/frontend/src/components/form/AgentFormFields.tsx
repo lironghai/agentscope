@@ -10,7 +10,13 @@ import {
 	FieldSet,
 } from '@/components/ui/field';
 
-export type AgentSection = 'identity' | 'context_config' | 'react_config' | 'invite_config';
+export type AgentSection =
+	| 'identity'
+	| 'context_config'
+	| 'react_config'
+	| 'invite_config'
+	| 'share_config'
+	| 'tool_config';
 
 export type AgentFormValues = {
 	[K in AgentSection]: Record<string, SchemaFormValue>;
@@ -33,9 +39,16 @@ const NESTED_SECTIONS: Array<{ key: Exclude<AgentSection, 'identity'>; i18n: str
 	{ key: 'context_config', i18n: 'context-config' },
 	{ key: 'react_config', i18n: 'react-config' },
 	{ key: 'invite_config', i18n: 'invite-config' },
+	{ key: 'share_config', i18n: 'share-config' },
+	{ key: 'tool_config', i18n: 'tool-config' },
 ];
 
 const IDENTITY_I18N = 'identity';
+const FORM_EXCLUDED_TOP_LEVEL = new Set([
+	'skill_bindings',
+	'mcp_bindings',
+	'share_grants',
+]);
 
 const toKebab = (s: string) => s.replace(/_/g, '-');
 
@@ -48,6 +61,7 @@ function sliceSchema(root: JSONSchema): Record<AgentSection, JSONSchema> {
 	const identityProps: Record<string, JSONSchemaProperty> = {};
 	for (const [k, prop] of Object.entries(props)) {
 		if (nestedKeys.has(k as Exclude<AgentSection, 'identity'>)) continue;
+		if (FORM_EXCLUDED_TOP_LEVEL.has(k)) continue;
 		identityProps[k] = prop;
 	}
 
@@ -56,7 +70,9 @@ function sliceSchema(root: JSONSchema): Record<AgentSection, JSONSchema> {
 		title: 'Identity',
 		properties: identityProps,
 		required: (root.required ?? []).filter(
-			(r) => !nestedKeys.has(r as Exclude<AgentSection, 'identity'>),
+			(r) =>
+				!nestedKeys.has(r as Exclude<AgentSection, 'identity'>) &&
+				!FORM_EXCLUDED_TOP_LEVEL.has(r),
 		),
 	};
 
@@ -71,6 +87,14 @@ function sliceSchema(root: JSONSchema): Record<AgentSection, JSONSchema> {
 			properties: {},
 		},
 		invite_config: (props.invite_config as JSONSchema) ?? {
+			type: 'object',
+			properties: {},
+		},
+		share_config: (props.share_config as JSONSchema) ?? {
+			type: 'object',
+			properties: {},
+		},
+		tool_config: (props.tool_config as JSONSchema) ?? {
 			type: 'object',
 			properties: {},
 		},
@@ -145,5 +169,7 @@ export function defaultAgentFormValues(schema: AgentSchemaV2Response): AgentForm
 		context_config: fromDefaults(sections.context_config),
 		react_config: fromDefaults(sections.react_config),
 		invite_config: fromDefaults(sections.invite_config),
+		share_config: fromDefaults(sections.share_config),
+		tool_config: fromDefaults(sections.tool_config),
 	};
 }

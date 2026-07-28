@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { useCredentials } from '@/hooks/useCredentials';
 import { useTranslation } from '@/i18n/useI18n';
+import { isCurrentUserAdmin } from '@/lib/admin';
 
 interface Props {
 	open: boolean;
@@ -23,9 +24,12 @@ interface Props {
 	onUpdated?: () => void;
 }
 
+const NON_ADMIN_SKIP_FIELDS = new Set(['id', 'type', 'shared']);
+
 export function EditCredentialDialog({ open, onOpenChange, credential, onUpdated }: Props) {
 	const { update } = useCredentials();
 	const { t } = useTranslation();
+	const canShareCredentials = isCurrentUserAdmin();
 	const [schema, setSchema] = useState<CredentialSchema | null>(null);
 	const [loadingSchema, setLoadingSchema] = useState(false);
 	const [values, setValues] = useState<Record<string, SchemaFormValue>>({});
@@ -70,6 +74,7 @@ export function EditCredentialDialog({ open, onOpenChange, credential, onUpdated
 				const val = values[key];
 				if (val !== undefined && val !== '') data[key] = val;
 			}
+			if (!canShareCredentials) data.shared = false;
 			await update(credential.id, { data });
 			onOpenChange(false);
 			onUpdated?.();
@@ -92,6 +97,7 @@ export function EditCredentialDialog({ open, onOpenChange, credential, onUpdated
 						schema={schema}
 						values={values}
 						onChange={(key, val) => setValues((prev) => ({ ...prev, [key]: val }))}
+						skipFields={canShareCredentials ? undefined : NON_ADMIN_SKIP_FIELDS}
 					/>
 				) : null}
 				<DialogFooter>

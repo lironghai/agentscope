@@ -1,4 +1,4 @@
-import { CircleAlert, Loader2, PlusCircle } from 'lucide-react';
+import { CircleAlert, Loader2, PlusCircle, Upload } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -18,22 +18,30 @@ import { useTranslation } from '@/i18n/useI18n';
 interface AddSkillDialogProps {
 	children: ReactNode;
 	onAdd: (skillPath: string) => Promise<void>;
+	onUpload?: (file: File) => Promise<void>;
 }
 
-export function AddSkillDialog({ children, onAdd }: AddSkillDialogProps) {
+export function AddSkillDialog({ children, onAdd, onUpload }: AddSkillDialogProps) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const [skillPath, setSkillPath] = useState('');
+	const [skillFile, setSkillFile] = useState<File | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
 	const handleSubmit = async () => {
-		if (!skillPath.trim()) return;
+		if (!skillPath.trim() && !skillFile) return;
 		setLoading(true);
 		setError(null);
 		try {
-			await onAdd(skillPath.trim());
+			if (skillFile) {
+				if (!onUpload) throw new Error(t('dialog-skill-add.uploadUnavailable'));
+				await onUpload(skillFile);
+			} else {
+				await onAdd(skillPath.trim());
+			}
 			setSkillPath('');
+			setSkillFile(null);
 			setOpen(false);
 		} catch (e) {
 			setError((e as Error).message);
@@ -56,11 +64,23 @@ export function AddSkillDialog({ children, onAdd }: AddSkillDialogProps) {
 						id="skill-path"
 						placeholder={t('dialog-skill-add.pathPlaceholder')}
 						value={skillPath}
+						disabled={skillFile !== null}
 						onChange={(e) => setSkillPath(e.target.value)}
 						onKeyDown={(e) => {
 							if (e.key === 'Enter') handleSubmit();
 						}}
 					/>
+					<Label htmlFor="skill-file">{t('dialog-skill-add.fileLabel')}</Label>
+					<Input
+						id="skill-file"
+						type="file"
+						accept=".zip,application/zip,application/x-zip-compressed"
+						disabled={skillPath.trim().length > 0}
+						onChange={(e) => setSkillFile(e.target.files?.[0] ?? null)}
+					/>
+					<p className="text-muted-foreground text-xs">
+						{t('dialog-skill-add.fileDescription')}
+					</p>
 					{error && <p className="text-destructive text-sm">{error}</p>}
 				</div>
 				<DialogFooter>
@@ -68,9 +88,14 @@ export function AddSkillDialog({ children, onAdd }: AddSkillDialogProps) {
 						<CircleAlert className="size-3.5" />
 						{t('common.cancel')}
 					</Button>
-					<Button onClick={handleSubmit} disabled={loading || !skillPath.trim()}>
+					<Button
+						onClick={handleSubmit}
+						disabled={loading || (!skillPath.trim() && !skillFile)}
+					>
 						{loading ? (
 							<Loader2 className="size-3.5 animate-spin" />
+						) : skillFile ? (
+							<Upload className="size-3.5" />
 						) : (
 							<PlusCircle className="size-3.5" />
 						)}

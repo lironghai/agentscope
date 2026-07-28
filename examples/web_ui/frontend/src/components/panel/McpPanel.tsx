@@ -1,19 +1,44 @@
 import { PlusCircle, Search, SearchX, Trash, Unplug } from 'lucide-react';
 import { useState } from 'react';
 
-import type { MCPClient, MCPClientStatus } from '@/api';
+import type { AgentMcpBinding, MCPClient, MCPClientStatus } from '@/api';
 import { DeleteDialog } from '@/components/dialog/DeleteDialog.tsx';
 import { CreateMCPDialog } from '@/components/dialog/MCPDialog.tsx';
 import { PanelEmpty } from '@/components/panel/PanelEmpty';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from '@/components/ui/item';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { useTranslation } from '@/i18n/useI18n.ts';
 
+function normalized(value: unknown): string | null {
+	if (typeof value !== 'string' && typeof value !== 'number') return null;
+	const text = String(value).trim().toLowerCase();
+	return text || null;
+}
+
+function addKey(keys: Set<string>, value: unknown) {
+	const key = normalized(value);
+	if (key) keys.add(key);
+}
+
+function safeSegment(value: string): string {
+	return value.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^[._]+|[._]+$/g, '') || 'item';
+}
+
+function materializedMcpName(binding: AgentMcpBinding): string | null {
+	const name = normalized(binding.name);
+	if (name) return name;
+	const id = normalized(binding.skillhub_server_id);
+	return id ? safeSegment(id) : 'skillhub_mcp';
+}
+
 interface McpPanelProps {
 	/** The MCP servers equipped in the workspace. */
 	mcps: MCPClientStatus[];
+	/** Agent-level MCP bindings configured before a session exists. */
+	configuredMcps?: AgentMcpBinding[];
 	/** Whether the MCP list is still loading. */
 	loading?: boolean;
 	/**
@@ -45,15 +70,42 @@ interface McpPanelProps {
  * @param onRemove - Remove-MCP callback.
  * @returns The MCP panel body.
  */
-export function McpPanel({ mcps, loading = false, onAdd, onRemove }: McpPanelProps) {
+export function McpPanel({
+	mcps,
+	configuredMcps = [],
+	loading = false,
+	onAdd,
+	onRemove,
+}: McpPanelProps) {
 	const { t } = useTranslation();
 	const [search, setSearch] = useState('');
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+	const workspaceKeys = new Set<string>();
+	for (const mcp of mcps) {
+		addKey(workspaceKeys, mcp.name);
+	}
 
 	const filtered = search
 		? mcps.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()))
 		: mcps;
+	const configuredFiltered = configuredMcps
+		.filter((binding) => binding.enabled !== false)
+		.filter((binding) => !workspaceKeys.has(materializedMcpName(binding) ?? ''))
+		.filter((binding) => {
+			if (!search) return true;
+			const text = [
+				binding.name,
+				binding.provider,
+				binding.transport,
+				binding.auth_type,
+				binding.skillhub_server_id,
+			]
+				.filter(Boolean)
+				.join(' ')
+				.toLowerCase();
+			return text.includes(search.toLowerCase());
+		});
 
 	return (
 		<div className="flex flex-col flex-1 min-h-0 gap-y-2">
@@ -73,7 +125,7 @@ export function McpPanel({ mcps, loading = false, onAdd, onRemove }: McpPanelPro
 				<div className="flex flex-1 items-center justify-center">
 					<p className="text-muted-foreground text-sm">{t('panel.loading')}</p>
 				</div>
-			) : filtered.length === 0 ? (
+			) : filtered.length === 0 && configuredFiltered.length === 0 ? (
 				<PanelEmpty
 					icon={search ? SearchX : Unplug}
 					title={search ? t('panel.search.emptyTitle') : t('panel.mcp.emptyTitle')}
@@ -119,6 +171,36 @@ export function McpPanel({ mcps, loading = false, onAdd, onRemove }: McpPanelPro
 							</ItemActions>
 						</Item>
 					))}
+					{configuredFiltered.map((binding) => {
+						const name =
+							binding.name ||
+							binding.skillhub_server_id ||
+							t('panel.mcp.unknownConfiguredMcp');
+						return (
+							<Item
+								key={binding.binding_id || name}
+								variant="outline"
+							>
+								<ItemContent>
+									<ItemTitle className="flex items-center gap-x-2">
+										<span>{name}</span>
+										<Badge variant="secondary">
+											{t('panel.mcp.configuredBadge')}
+										</Badge>
+									</ItemTitle>
+									<ItemDescription>
+										<KbdGroup>
+											{binding.transport ? (
+												<Kbd>{binding.transport.toUpperCase()}</Kbd>
+											) : null}
+											{binding.provider ? <Kbd>{binding.provider}</Kbd> : null}
+											{binding.auth_type ? <Kbd>{binding.auth_type}</Kbd> : null}
+										</KbdGroup>
+									</ItemDescription>
+								</ItemContent>
+							</Item>
+						);
+					})}
 				</div>
 			)}
 

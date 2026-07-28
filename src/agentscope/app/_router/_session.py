@@ -4,12 +4,12 @@ import asyncio
 import json
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
-from ..._utils._common import _generate_id
 from ..access import ResourceKind
 from ..deps import (
+    get_agent_workspace_service,
     get_chat_service,
     get_current_user_id,
     get_long_term_memory_browser,
@@ -19,6 +19,7 @@ from ..deps import (
     get_storage,
     get_workspace_manager,
 )
+from ..._logging import logger
 from ._schema import (
     CreateSessionRequest,
     CreateSessionResponse,
@@ -37,6 +38,7 @@ from ._schema import (
 )
 from ..message_bus import MessageBus, MessageBusKeys
 from .._service import (
+    AgentWorkspaceService,
     AgentView,
     ResourceAccessService,
     ChatService,
@@ -274,6 +276,9 @@ async def create_session(
     user_id: str = Depends(get_current_user_id),
     storage: StorageBase = Depends(get_storage),
     workspace_manager: WorkspaceManagerBase = Depends(get_workspace_manager),
+    agent_workspace_service: AgentWorkspaceService = Depends(
+        get_agent_workspace_service,
+    ),
     access: ResourceAccessService = Depends(get_resource_access_service),
 ) -> CreateSessionResponse:
     """Create (or resume) a session for a given agent and workspace.
@@ -286,10 +291,10 @@ async def create_session(
         body (`CreateSessionRequest`): Agent, workspace, and model config.
         user_id (`str`): Injected authenticated user ID.
         storage (`StorageBase`): Injected storage backend.
-        workspace_manager (`WorkspaceManagerBase`): Injected workspace
-            manager; consulted via
-            :meth:`WorkspaceManagerBase.assign_workspace_id` to fill in
-            ``workspace_id`` when the request body omits it.
+        workspace_manager (`WorkspaceManagerBase`): Deprecated compatibility
+            dependency; ordinary sessions now inherit the Agent workspace id.
+        agent_workspace_service (`AgentWorkspaceService`): Service used to
+            resolve the deterministic Agent workspace id.
         access (`ResourceAccessService`): Injected access service.
 
     Returns:
@@ -300,7 +305,7 @@ async def create_session(
             is not visible to the caller.
     """
     # Agent must be visible to the caller (own or shared).
-    await access.resolve_agent(user_id, body.agent_id)
+    agent_record = await access.resolve_agent(user_id, body.agent_id)
 
     await _ensure_credential_exists(access, user_id, body.chat_model_config)
     await _ensure_credential_exists(
@@ -315,15 +320,13 @@ async def create_session(
         body.knowledge_config,
     )
 
-    # Resolve the workspace binding for this session. Explicit
-    # ``body.workspace_id`` always wins (used by team invite / borrow
-    # flows to force sharing); otherwise defer to the manager's
-    # isolation policy — see ``WorkspaceManagerBase.assign_workspace_id``.
+    # Explicit ``body.workspace_id`` still wins for team invite / borrow
+    # flows. Ordinary sessions inherit the deterministic Agent workspace.
+    del workspace_manager
     resolved_workspace_id = body.workspace_id or (
-        workspace_manager.assign_workspace_id(
-            user_id=user_id,
+        agent_workspace_service.agent_workspace_id(
+            user_id=agent_record.user_id,
             agent_id=body.agent_id,
-            session_id=_generate_id(),
         )
     )
 
@@ -332,6 +335,11 @@ async def create_session(
         agent_id=body.agent_id,
         config=SessionConfig(
             workspace_id=resolved_workspace_id,
+            workspace_owner_id=(
+                None
+                if body.workspace_id is not None
+                else agent_record.user_id
+            ),
             chat_model_config=body.chat_model_config,
             fallback_chat_model_config=body.fallback_chat_model_config,
             tts_model_config=body.tts_model_config,

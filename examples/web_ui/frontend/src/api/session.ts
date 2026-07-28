@@ -21,10 +21,19 @@ export interface MessagesResponse {
 	has_more: boolean;
 }
 
+function skillHubHeaders(): Record<string, string> | undefined {
+	const token = localStorage.getItem('skillhub_token')?.trim();
+	if (!token) return undefined;
+	return { 'X-SkillHub-Token': token };
+}
+
 export const sessionApi = {
 	list: (agentId: string) => client.get<SessionListResponse>('/sessions/', { agent_id: agentId }),
 
-	create: (body: CreateSessionRequest) => client.post<CreateSessionResponse>('/sessions/', body),
+	create: (body: CreateSessionRequest) =>
+		client.post<CreateSessionResponse>('/sessions/', body, undefined, {
+			headers: skillHubHeaders(),
+		}),
 
 	update: (sessionId: string, agentId: string, body: UpdateSessionRequest) =>
 		client.patch<SessionRecord>(`/sessions/${sessionId}`, body, { agent_id: agentId }),
@@ -47,12 +56,21 @@ export const sessionApi = {
 			agent_id: agentId,
 		}),
 
-	messages: (sessionId: string, agentId: string, params?: { before?: string; limit?: number }) =>
-		client.get<MessagesResponse>(`/sessions/${sessionId}/messages`, {
-			agent_id: agentId,
-			...(params?.before != null && { before: params.before }),
-			...(params?.limit != null && { limit: String(params.limit) }),
-		}),
+	messages: (
+		sessionId: string,
+		agentId: string,
+		params?: { before?: string; limit?: number },
+		signal?: AbortSignal,
+	) =>
+		client.get<MessagesResponse>(
+			`/sessions/${sessionId}/messages`,
+			{
+				agent_id: agentId,
+				...(params?.before != null && { before: params.before }),
+				...(params?.limit != null && { limit: String(params.limit) }),
+			},
+			{ signal, silent: true },
+		),
 
 	diagnosticsByReply: (sessionId: string, agentId: string, replyId: string) =>
 		client.get<ExecutionTraceRecord>(
@@ -119,6 +137,7 @@ export const sessionApi = {
 			method: 'GET',
 			params: { agent_id: agentId },
 			signal,
+			silent: true,
 		});
 
 		const reader = res.body!.getReader();

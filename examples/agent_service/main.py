@@ -10,6 +10,7 @@ from pydantic import SecretStr
 
 from agentscope.app import (
     LongTermMemoryBrowser,
+    SkillHubCatalogClient,
     SubAgentTemplate,
     create_app,
 )
@@ -76,6 +77,24 @@ def _env_float(name: str, default: float) -> float:
     """Parse a float environment variable."""
     value = os.getenv(name)
     return float(value) if value else default
+
+
+def _build_skillhub_catalog_client() -> SkillHubCatalogClient | None:
+    """Build the optional read-only SkillHub catalog client."""
+    base_url = os.getenv("SKILLHUB_BASE_URL")
+    if not base_url:
+        return None
+    return SkillHubCatalogClient(
+        base_url=base_url,
+        service_token=os.getenv("SKILLHUB_SERVICE_TOKEN"),
+        timeout=_env_float("SKILLHUB_TIMEOUT", 10.0),
+    )
+
+
+def _env_csv(name: str, default: str = "") -> set[str]:
+    """Parse a comma-separated environment variable."""
+    value = os.getenv(name, default)
+    return {item.strip() for item in value.split(",") if item.strip()}
 
 
 def _postgres_kwargs() -> dict:
@@ -244,6 +263,7 @@ shared_agent_policy = SharedAgentPolicy()
 app = create_app(
     storage=storage,
     resource_access_policy=shared_agent_policy,
+    admin_user_ids=_env_csv("AGENT_SERVICE_ADMIN_USER_IDS", "admin"),
     message_bus=RedisMessageBus(
         host=os.getenv("REDIS_HOST", "127.0.0.1"),
         port=_env_int("REDIS_PORT", 6379),
@@ -306,6 +326,7 @@ so anything you want them to see MUST be sent through `TeamSay`.""",
         ),
     ],
     long_term_memory_browser=LongTermMemoryBrowser(_long_term_memory_root),
+    skillhub_catalog_client=_build_skillhub_catalog_client(),
     extra_agent_middlewares=long_term_memory_factory,
     extra_middlewares=[
         Middleware(

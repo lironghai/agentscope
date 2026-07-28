@@ -22,11 +22,20 @@ export const SetupPage = ({ onComplete, className }: Props) => {
 	const { t } = useTranslation();
 	const [url, setUrl] = useState(() => localStorage.getItem('server_url') ?? '');
 	const [username, setUsername] = useState(() => localStorage.getItem('username') ?? '');
+	const [skillHubToken, setSkillHubToken] = useState(
+		() => localStorage.getItem('skillhub_token') ?? '',
+	);
 
 	const handleSubmit = (e: React.FormEvent) => {
 		e.preventDefault();
 		localStorage.setItem('server_url', url);
 		localStorage.setItem('username', username);
+		const trimmedSkillHubToken = skillHubToken.trim();
+		if (trimmedSkillHubToken) {
+			localStorage.setItem('skillhub_token', trimmedSkillHubToken);
+		} else {
+			localStorage.removeItem('skillhub_token');
+		}
 		onComplete();
 	};
 
@@ -66,6 +75,22 @@ export const SetupPage = ({ onComplete, className }: Props) => {
 										onChange={(e) => setUsername(e.target.value)}
 										required
 									/>
+								</Field>
+								<Field>
+									<FieldLabel htmlFor="skillhub-token-input">
+										{t('setup.skillhubToken')}
+									</FieldLabel>
+									<Input
+										id="skillhub-token-input"
+										type="password"
+										placeholder={t('setup.skillhubTokenPlaceholder')}
+										value={skillHubToken}
+										onChange={(e) => setSkillHubToken(e.target.value)}
+										autoComplete="off"
+									/>
+									<FieldDescription>
+										{t('setup.skillhubTokenDescription')}
+									</FieldDescription>
 								</Field>
 								<Field>
 									<Button type="submit" className="w-full">

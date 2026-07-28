@@ -19,6 +19,7 @@
 		"interrupted": "已中断",
 		"knowledge": "知识库",
 		"loading": "加载中...",
+		"mcp": "MCP",
 		"model": "模型",
 		"name": "名称",
 		"no": "否",
@@ -33,6 +34,7 @@
 		"schedule": "日程",
 		"selectAgent": "选择 Agent",
 		"settings": "设置",
+		"skill": "Skill",
 		"switchToZh": "切换为中文",
 		"switchToEn": "Switch to English",
 		"success": "成功",
@@ -190,6 +192,13 @@
 			"invite-description": {
 				"label": "邀请说明",
 				"placeholder": "简要描述此 Agent 的专长；允许被邀请时必填。"
+			}
+		},
+		"share-config": {
+			"legend": "共享配置",
+			"description": "控制此 Agent 是否对其他用户可见。",
+			"shared": {
+				"label": "共享"
 			}
 		}
 	},
@@ -360,6 +369,32 @@
 			"emptyDescription": "本次查询没有返回任何分块。"
 		}
 	},
+	"globalCatalog": {
+		"search": "搜索",
+		"total": "{{count}} 条结果",
+		"shown": "已显示 {{shown}} / {{total}} 条",
+		"loadMore": "加载更多",
+		"loadingMore": "加载中...",
+		"allLoaded": "已加载全部结果",
+		"error": "无法加载 SkillHub 目录。",
+		"errorTitle": "SkillHub 不可用",
+		"skills": {
+			"title": "Skill",
+			"subtitle": "浏览 AgentScope 可使用的 SkillHub Skill。",
+			"searchPlaceholder": "搜索 Skill",
+			"emptyTitle": "暂无 Skill",
+			"emptyDescription": "当前搜索没有匹配的 SkillHub Skill。"
+		},
+		"mcps": {
+			"title": "MCP",
+			"subtitle": "浏览 AgentScope 可使用的 SkillHub MCP 服务。",
+			"searchPlaceholder": "搜索 MCP 服务",
+			"catalogTab": "目录",
+			"internalTab": "内部服务",
+			"emptyTitle": "暂无 MCP 服务",
+			"emptyDescription": "当前搜索没有匹配的 SkillHub MCP 服务。"
+		}
+	},
 	"llm-select": {
 		"placeholder": "选择模型",
 		"fallbackPlaceholder": "兜底模型",
@@ -416,9 +451,12 @@
 	},
 	"dialog-skill-add": {
 		"title": "添加技能",
-		"description": "输入技能目录的路径以添加到工作区。",
+		"description": "输入技能目录路径，或上传包含 SKILL.md 的 zip 包。",
 		"pathLabel": "技能路径",
-		"pathPlaceholder": "/path/to/skill"
+		"pathPlaceholder": "/path/to/skill",
+		"fileLabel": "上传技能包",
+		"fileDescription": "支持 .zip 文件；包内需要一个 SKILL.md 作为入口，可同时包含 scripts、references、templates 等资源目录。",
+		"uploadUnavailable": "当前环境未启用技能上传。"
 	},
 	"schedule": {
 		"calendar": "日历",
@@ -489,6 +527,9 @@
 		"serverUrlPlaceholder": "https://...",
 		"username": "用户名",
 		"usernamePlaceholder": "请输入用户名",
+		"skillhubToken": "SkillHub Token",
+		"skillhubTokenPlaceholder": "可选的个人 SkillHub Token",
+		"skillhubTokenDescription": "仅用于 SkillHub Skill/MCP 目录请求。留空时使用服务端兜底 Token。",
 		"submit": "开始使用",
 		"hint": "此应用仅提供前端服务，所有数据均来自填写的服务器地址，用户名仅用于服务端鉴权。"
 	},
@@ -543,7 +584,9 @@
 			"add": "添加 MCP",
 			"tools": "{{count}} 个工具",
 			"emptyTitle": "暂无 MCP 服务器",
-			"emptyDescription": "添加 MCP 服务器为工作区配备工具。"
+			"emptyDescription": "添加 MCP 服务器为工作区配备工具。",
+			"configuredBadge": "Agent 配置",
+			"unknownConfiguredMcp": "未命名 MCP"
 		},
 		"skill": {
 			"title": "技能",
@@ -551,7 +594,9 @@
 			"searchPlaceholder": "在工作区中搜索技能",
 			"add": "添加技能",
 			"emptyTitle": "暂无技能",
-			"emptyDescription": "添加技能为工作区配备能力。"
+			"emptyDescription": "添加技能为工作区配备能力。",
+			"configuredBadge": "Agent 配置",
+			"unknownConfiguredSkill": "未命名技能"
 		},
 		"knowledge": {
 			"title": "知识库",
@@ -624,5 +669,15 @@
 		"stages": "阶段",
 		"toolCalls": "工具调用",
 		"events": "事件"
+	},
+	"agent-bindings": {
+		"legend": "Skill 与 MCP",
+		"description": "为此 Agent 选择全局 SkillHub 资源。",
+		"skills": "Skill",
+		"mcps": "MCP 服务",
+		"emptySkills": "暂无可用 SkillHub Skill。",
+		"emptyMcps": "暂无可用 SkillHub MCP 服务。",
+		"loadError": "无法加载 SkillHub 资源。",
+		"refresh": "刷新 SkillHub 资源"
 	}
 }
